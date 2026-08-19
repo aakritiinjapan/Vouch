@@ -123,6 +123,7 @@ vouch/
 │       ├── scraper/
 │       │   ├── brightdata.py     ★ wraps run / heal / approve (+ MOCK_MODE)
 │       │   └── baseline.py       capture + store last-known-good profile
+│       ├── service.py           ★ the ONLY module that writes rows (persistence + decisions)
 │       ├── guardian/
 │       │   ├── checks.py         ★ tiered validation (structural, distributional, column-swap)
 │       │   ├── judge.py          LLM-as-judge on sampled rows (stub → wire Anthropic)
@@ -130,15 +131,24 @@ vouch/
 │       ├── pricing/
 │       │   └── engine.py         propose new price from competitor data + rules
 │       └── api/
-│           └── routes.py         REST endpoints for the dashboard
-│   └── tests/
-│       ├── test_checks.py        ★ proves the guardian catches a bad heal
-│       └── fixtures/sample_runs.json  baseline vs. good vs. swapped heal
+│           ├── routes.py         REST endpoints for the dashboard
+│           └── schemas.py        read models + the builders that assemble them
+│   ├── tests/                   90 tests
+│   │   ├── test_checks.py        ★ proves the guardian catches a bad heal
+│   │   ├── test_guardian_edges.py ★ proves it does NOT cry wolf on legitimate drift
+│   │   ├── test_orchestrator.py  the cycle + retry loop, with no database
+│   │   ├── test_service.py       the persistence contract, incl. the trust ratchet
+│   │   ├── test_api.py           the demo arc, driven over HTTP
+│   │   ├── test_brightdata.py    the live CLI path (approval gate, envelope parsing)
+│   │   ├── test_pricing.py       the floor-margin clamp
+│   │   └── fixtures/sample_runs.json  baseline / degraded run / good heal / swapped heal
+│   └── scripts/seed.py           demo products, baseline, and price history
 ├── frontend/                     React + Vite dashboard (Claude Code scaffolds via `npm create vite`)
-├── docs/
-│   ├── RESEARCH.md               why this idea (hand to teammates)
-│   └── DEMO_SCRIPT.md            the 5-minute demo sequence
-└── scripts/seed.py               seed demo products + notes on the mock competitor page
+└── docs/
+    ├── RESEARCH.md               why this idea (hand to teammates)
+    ├── DEMO_SCRIPT.md            the 5-minute demo sequence
+    ├── BRIGHT_DATA_NOTES.md      Scraper Studio gotchas + the Newegg target, verified
+    └── sample_output.json        real collector output (written by scripts/create_collector.py)
 ```
 
 ★ = already scaffolded with real logic or precise signatures. Everything else, build per below.
@@ -221,25 +231,156 @@ Honest data state, never fake continuity: a held source shows "last confirmed 2h
 ## 8. Environment
 
 ```bash
-# backend
-cd backend
-python -m venv .venv && source .venv/bin/activate
+# backend  (from vouch/backend)
+python -m venv .venv
+source .venv/Scripts/activate        # Windows; use .venv/bin/activate elsewhere
 pip install -r requirements.txt
-cp ../.env.example ../.env      # then fill in tokens (or leave MOCK_MODE=true to run offline)
-uvicorn app.main:app --reload
+python -m scripts.seed               # 3 products, 1 baseline, 24 price observations
+uvicorn app.main:app --reload        # http://127.0.0.1:8000  (/docs for the API)
 
-# frontend
-cd frontend
+# frontend  (from vouch/frontend)
 npm install
-npm run dev
+npm run dev                          # http://127.0.0.1:5173, proxies /api to the backend
+
+# tests
+cd backend && pytest -q              # 90 tests
 ```
+
+`.env` is optional - every default is set for offline use (`MOCK_MODE=true`). Copy `.env.example`
+from the repo root if you want to fill in tokens. `database_url` resolves to an absolute path under
+`backend/`, so it cannot matter which directory you launch from.
 
 See `.env.example` for the variables. `MOCK_MODE=true` runs the entire pipeline against fixtures
 with no Bright Data / Anthropic calls — use it for all dev and for a deterministic demo.
 
 ---
 
-## 9. Non-goals / guardrails (don't over-build)
+## 9. How Vouch uses Bright Data Scraper Studio
+
+Scraper Studio is not a bolted-on scrape here - Vouch **wraps its heal loop**, and the product only
+exists because of one specific property of that loop.
+
+**The collector.** A custom Scraper Studio collector, created from the CLI with a precise
+natural-language field description (item name, sale price, shipping cost, rating, stock), reads a
+public competitor listing page. Its first clean run becomes the guardian's **baseline** - a per-field
+statistical fingerprint (`guardian/checks.py:profile_run`) stored in the `Baseline` table.
+
+**The loop we wrap** (`orchestrator.run_cycle_for_product`):
+
+| Step | Scraper Studio | Vouch |
+|---|---|---|
+| 1 | `scraper run` | profile the rows; compare against the baseline |
+| 2 | - | if a check fires (`NULL_SPIKE`, `FIELD_MISSING`, `ROW_COUNT_SHIFT`), trigger a heal |
+| 3 | `scraper heal` -> stops at the gate, `status: "awaiting_approval"` | read `preview_result` - the rows the fix *would* produce |
+| 4 | - | **validate them before committing**: confidence 0-100 + PASS/REVIEW/FAIL + a plain-English brief |
+| 5 | `scraper approve <id>` / `... --reject` | commit only what we can vouch for; reject the rest |
+| 6 | `scraper heal` again | re-prompt with the guardian's own diagnosis, then re-validate |
+
+**Why the pre-approval gate is the whole thesis.** Bright Data exposes no programmatic collector
+rollback, so a wrong `approve` is expensive to undo. The gate is the only safe place to stand - which
+is why Vouch validates *before* committing rather than monitoring afterwards.
+
+**The property that makes it possible.** Without `--auto-approve`, `heal` pauses and its envelope
+carries `preview_result`: the sample rows the fixed scraper would return. Scraper Studio's own UI
+shows only the **code diff** on Accept/Decline. So the CLI/API path surfaces data the approval screen
+cannot show a human - and that is exactly the data you need to catch a heal that is *shaped* right
+and *meaning* wrong. **We never pass `--auto-approve`**: it commits without the gate, which would
+delete the thing this product is.
+
+### The two ways a heal lies, and why one check is not enough
+
+The guardian catches two genuinely different failures, and the second is the reason it has four tiers
+rather than three:
+
+| The heal starts reading... | How far off | What catches it | What it costs you |
+|---|---|---|---|
+| the **shipping cost** as the price | ~100x too low | `COLUMN_SWAP` - the distributions no longer overlap at all | margin: you undercut yourself into the floor |
+| the **crossed-out original** as the price | ~14% too high | `VALUE_ORDER_INVERTED` - see below | the sale: you price above the market |
+
+The second one defeats every distributional check, and that is not a tuning problem. A 14% shift will
+not move a median past `check_numeric_drift`'s threshold, and `check_column_swap` *deliberately
+refuses* to compare two fields whose baselines look that similar - for indistinguishable fields,
+"closer to the other one" is noise, not evidence. Loosening either threshold to catch it would start
+holding legitimate price drift, which is its own harm.
+
+So Tier 2c uses a different kind of evidence entirely: an **invariant**. A sale price can never exceed
+the list price it is discounted from. When that inverts on most rows, it is about as close to proof of
+a swap as scraped data offers - and unlike every other check, it needs no baseline, so it protects the
+very first run too. `tests/test_value_ordering.py` proves the distributional tier is blind here rather
+than just asserting it, so nobody later deletes the check thinking it is redundant.
+
+The two failures also harm you in **opposite directions**, which the held card has to get right:
+underpricing destroys margin, overpricing loses the sale. The counterfactual names which one, because
+rendering "+$200 per unit" as a margin figure would be straightforwardly wrong.
+
+**Step 6 is the part we are proudest of.** `orchestrator._resharpen_prompt` turns the guardian's
+machine-readable finding into the next heal prompt - for a `COLUMN_SWAP` it tells Scraper Studio which
+column it grabbed, what median it returned, and what the field's own historical range was. Vouch's
+validator writes Scraper Studio's next instruction. Capped at 2 attempts, because each one is a real
+heal against real credits and a 3-job AI-Flow concurrency cap.
+
+Operational detail - the CLI's 500-char description cap, the orphaned collectors a failed `create`
+leaves behind, the AI-Flow concurrency limit, and the Newegg page quirks the collector has to survive
+- is written up in [`docs/BRIGHT_DATA_NOTES.md`](docs/BRIGHT_DATA_NOTES.md).
+
+**Live collector ID:** `c_mszq0z1x27brru3wab` — a custom Scraper Studio collector built from the CLI
+against [Newegg's GPU category page](https://www.newegg.com/GPUs-Video-Graphics-Cards/SubCategory/ID-48?PageSize=96),
+extracting name / price / shipping / rating / stock for 96 cards in one run.
+
+**Example structured output:** [`docs/sample_output.json`](docs/sample_output.json) — the real 96-row
+run that became the guardian's baseline.
+**A real heal at the gate:** [`docs/live_heal_vague.json`](docs/live_heal_vague.json) — an actual
+`scraper heal`, captured *at* `awaiting_approval` with its `preview_result` rows and the guardian's
+verdict on them, before anything was committed. Reproduce with `python -m scripts.live_heal`.
+
+What that live run did and did not establish, stated plainly:
+
+- ✅ **The architecture holds against the real API.** The gate stopped at `awaiting_approval`, handed us
+  `preview_result`, the guardian rendered a verdict on those rows, and we rejected — leaving the
+  collector untouched and operational, exactly as the design assumes.
+- ✅ **It taught us something the docs omit.** `preview_result` is a *sample* — 1 row against our 96-row
+  baseline. That initially broke the volume-dependent checks, which reported the preview size as a
+  finding (`Row count changed from 96 to 1`) instead of judging the heal. It is now handled explicitly
+  via `is_sample`, and the detection matrix is verified against the real baseline: a one-row preview
+  still catches a shipping swap, a null price, a dropped field, and a crossed-out original. See
+  [`BRIGHT_DATA_NOTES.md`](docs/BRIGHT_DATA_NOTES.md) §2.
+- ⚠️ **The heal we triggered was not a bad one.** Our deliberately vague prompt still produced a correct
+  extraction ($519.99 for a Radeon RX 9060 XT), so the guardian passed it — the right answer, not a
+  missed detection. The *rejected*-heal path is therefore demonstrated against the fixture, where a
+  swap can be produced on demand. We have not manufactured a real bad heal and do not claim to have.
+
+One honest note on the collector's output shape: Scraper Studio named its container after what it found
+(`graphics_cards`), nested each product inside it, and returned prices as
+`{"value": 299.99, "currency": "USD"}`. That is not wrong, it just is not the flat shape the guardian
+profiles — so `scraper/brightdata.py:_rows` normalises it in one place rather than teaching every check
+about the wrapper. It also **refuses any non-USD price outright**: `newegg.ca` does not redirect to
+`.com` and serves a different catalogue in CAD, so accepting those numbers as USD would silently poison
+the price history. `original_price` was *not* captured by this collector (Newegg shows a crossed-out
+price on only ~33% of tiles), so `VALUE_ORDER_INVERTED` is exercised against the fixture rather than
+live.
+
+---
+
+## 10. AI assistance disclosure
+
+This project was built with **Claude Code** (Anthropic) as the coding agent, driven from the terminal
+alongside the Bright Data CLI - the workflow the hackathon's resources page describes.
+
+What the agent did: scaffolded and implemented the persistence layer, REST API, and React dashboard;
+wrote the test suite; and researched the Scraper Studio CLI/API surface against Bright Data's docs.
+
+What we did: chose the problem and the architecture - validating a heal at the pre-approval gate, and
+placing it inside a repricer so reliability is the headline feature rather than plumbing (see
+[`docs/RESEARCH.md`](docs/RESEARCH.md)); made the design calls the agent surfaced, including storing
+the counterfactual as one column on the decision rather than as a second observation, the trust
+ratchet on baselines, and inverting the demo's break technique once it became clear that an
+underspecified *create* prompt would poison the very baseline the guardian judges against; and
+reviewed every rule in `guardian/` line by line. We can explain and defend every architectural
+decision in this repo.
+
+---
+
+## 11. Non-goals / guardrails (don't over-build)
 
 - **Don't build "self-healing."** Bright Data provides it. We build the *validation layer* on top.
 - **Don't put the heal drama in the seller's face.** Held decisions and honest staleness only.

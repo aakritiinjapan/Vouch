@@ -1,0 +1,17 @@
+# Normalise every text file to LF in the repository, and check it out native.
+# Without this the working tree depends on each machine's core.autocrlf setting, which shows up
+# as whole-file diffs when someone with a different setting commits.
+* text=auto
+
+# Explicit for the ones that matter, so tooling never has to guess.
+*.py    text diff=python
+*.ts    text
+*.tsx   text
+*.js    text
+*.json  text
+*.css   text
+*.html  text
+*.md    text
+
+# Generated; keep it out of diffs and language stats.
+package-lock.json  linguist-generated=true -diff

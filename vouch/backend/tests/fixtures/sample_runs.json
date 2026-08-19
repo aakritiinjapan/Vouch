@@ -1,36 +1,333 @@
 {
-  "_comment": "Three runs of the same competitor collector. 'baseline' is last-known-good. 'healed_good' is a correct self-heal (same meaning). 'healed_swapped' is the dangerous case: after a layout change the heal grabbed the shipping cost into the price field. Same shape, wrong meaning. The guardian must PASS healed_good and FAIL healed_swapped.",
-
+  "_comment": "Five runs of the same competitor collector. 'baseline' is last-known-good. 'run_degraded' is a post-layout-change run where price came back null on 6/8 rows - this is what legitimately TRIGGERS a heal. 'healed_good' is a correct self-heal (same meaning). The other two are the dangerous cases: 'healed_swapped' put the SHIPPING cost in the price field (obvious to a distribution check - 100x off), and 'healed_swapped_original' put the crossed-out ORIGINAL price there (invisible to a distribution check - only ~14% off - and caught only by the price <= original_price invariant). The guardian must PASS healed_good and FAIL both swaps.",
   "baseline": [
-    {"name": "MSI RTX 5080 Gaming Trio",      "price": 1299.99, "shipping": 19.99, "rating": 4.6, "in_stock": true},
-    {"name": "ASUS TUF RTX 5080 OC",          "price": 1249.00, "shipping": 15.00, "rating": 4.5, "in_stock": true},
-    {"name": "Gigabyte RTX 5080 Aorus",       "price": 1399.99, "shipping": 24.99, "rating": 4.7, "in_stock": false},
-    {"name": "ASUS ROG Astral RTX 5090",      "price": 1999.00, "shipping": 29.99, "rating": 4.8, "in_stock": true},
-    {"name": "MSI RTX 5090 Suprim Liquid",    "price": 2099.99, "shipping": 0.00,  "rating": 4.4, "in_stock": true},
-    {"name": "Gigabyte RTX 5070 Ti Eagle",    "price": 749.99,  "shipping": 14.99, "rating": 4.3, "in_stock": true},
-    {"name": "ASUS Prime RTX 5070",           "price": 599.00,  "shipping": 12.99, "rating": 4.2, "in_stock": true},
-    {"name": "MSI RTX 5070 Ventus 3X",        "price": 629.99,  "shipping": 18.50, "rating": 4.1, "in_stock": false}
+    {
+      "name": "MSI RTX 5080 Gaming Trio",
+      "price": 1299.99,
+      "shipping": 19.99,
+      "rating": 4.6,
+      "in_stock": true,
+      "original_price": 1499.99
+    },
+    {
+      "name": "ASUS TUF RTX 5080 OC",
+      "price": 1249.0,
+      "shipping": 15.0,
+      "rating": 4.5,
+      "in_stock": true,
+      "original_price": 1449.0
+    },
+    {
+      "name": "Gigabyte RTX 5080 Aorus",
+      "price": 1399.99,
+      "shipping": 24.99,
+      "rating": 4.7,
+      "in_stock": false,
+      "original_price": 1599.99
+    },
+    {
+      "name": "ASUS ROG Astral RTX 5090",
+      "price": 1999.0,
+      "shipping": 29.99,
+      "rating": 4.8,
+      "in_stock": true,
+      "original_price": 2199.0
+    },
+    {
+      "name": "MSI RTX 5090 Suprim Liquid",
+      "price": 2099.99,
+      "shipping": 0.0,
+      "rating": 4.4,
+      "in_stock": true,
+      "original_price": 2299.99
+    },
+    {
+      "name": "Gigabyte RTX 5070 Ti Eagle",
+      "price": 749.99,
+      "shipping": 14.99,
+      "rating": 4.3,
+      "in_stock": true,
+      "original_price": 869.99
+    },
+    {
+      "name": "ASUS Prime RTX 5070",
+      "price": 599.0,
+      "shipping": 12.99,
+      "rating": 4.2,
+      "in_stock": true,
+      "original_price": 699.0
+    },
+    {
+      "name": "MSI RTX 5070 Ventus 3X",
+      "price": 629.99,
+      "shipping": 18.5,
+      "rating": 4.1,
+      "in_stock": false,
+      "original_price": 729.99
+    }
   ],
-
+  "run_degraded": [
+    {
+      "name": "MSI RTX 5080 Gaming Trio",
+      "price": null,
+      "shipping": 19.99,
+      "rating": 4.6,
+      "in_stock": true,
+      "original_price": 1499.99
+    },
+    {
+      "name": "ASUS TUF RTX 5080 OC",
+      "price": 1249.0,
+      "shipping": 15.0,
+      "rating": 4.5,
+      "in_stock": true,
+      "original_price": 1449.0
+    },
+    {
+      "name": "Gigabyte RTX 5080 Aorus",
+      "price": null,
+      "shipping": 24.99,
+      "rating": 4.7,
+      "in_stock": false,
+      "original_price": 1599.99
+    },
+    {
+      "name": "ASUS ROG Astral RTX 5090",
+      "price": null,
+      "shipping": 29.99,
+      "rating": 4.8,
+      "in_stock": true,
+      "original_price": 2199.0
+    },
+    {
+      "name": "MSI RTX 5090 Suprim Liquid",
+      "price": null,
+      "shipping": 0.0,
+      "rating": 4.4,
+      "in_stock": true,
+      "original_price": 2299.99
+    },
+    {
+      "name": "Gigabyte RTX 5070 Ti Eagle",
+      "price": null,
+      "shipping": 14.99,
+      "rating": 4.3,
+      "in_stock": true,
+      "original_price": 869.99
+    },
+    {
+      "name": "ASUS Prime RTX 5070",
+      "price": 599.0,
+      "shipping": 12.99,
+      "rating": 4.2,
+      "in_stock": true,
+      "original_price": 699.0
+    },
+    {
+      "name": "MSI RTX 5070 Ventus 3X",
+      "price": null,
+      "shipping": 18.5,
+      "rating": 4.1,
+      "in_stock": false,
+      "original_price": 729.99
+    }
+  ],
   "healed_good": [
-    {"name": "MSI RTX 5080 Gaming Trio",      "price": 1289.99, "shipping": 19.99, "rating": 4.6, "in_stock": true},
-    {"name": "ASUS TUF RTX 5080 OC",          "price": 1259.00, "shipping": 15.00, "rating": 4.5, "in_stock": true},
-    {"name": "Gigabyte RTX 5080 Aorus",       "price": 1379.99, "shipping": 24.99, "rating": 4.7, "in_stock": true},
-    {"name": "ASUS ROG Astral RTX 5090",      "price": 1979.00, "shipping": 29.99, "rating": 4.8, "in_stock": true},
-    {"name": "MSI RTX 5090 Suprim Liquid",    "price": 2149.99, "shipping": 0.00,  "rating": 4.4, "in_stock": true},
-    {"name": "Gigabyte RTX 5070 Ti Eagle",    "price": 739.99,  "shipping": 14.99, "rating": 4.3, "in_stock": true},
-    {"name": "ASUS Prime RTX 5070",           "price": 609.00,  "shipping": 12.99, "rating": 4.2, "in_stock": true},
-    {"name": "MSI RTX 5070 Ventus 3X",        "price": 639.99,  "shipping": 18.50, "rating": 4.1, "in_stock": true}
+    {
+      "name": "MSI RTX 5080 Gaming Trio",
+      "price": 1289.99,
+      "shipping": 19.99,
+      "rating": 4.6,
+      "in_stock": true,
+      "original_price": 1499.99
+    },
+    {
+      "name": "ASUS TUF RTX 5080 OC",
+      "price": 1259.0,
+      "shipping": 15.0,
+      "rating": 4.5,
+      "in_stock": true,
+      "original_price": 1449.0
+    },
+    {
+      "name": "Gigabyte RTX 5080 Aorus",
+      "price": 1379.99,
+      "shipping": 24.99,
+      "rating": 4.7,
+      "in_stock": true,
+      "original_price": 1599.99
+    },
+    {
+      "name": "ASUS ROG Astral RTX 5090",
+      "price": 1979.0,
+      "shipping": 29.99,
+      "rating": 4.8,
+      "in_stock": true,
+      "original_price": 2199.0
+    },
+    {
+      "name": "MSI RTX 5090 Suprim Liquid",
+      "price": 2149.99,
+      "shipping": 0.0,
+      "rating": 4.4,
+      "in_stock": true,
+      "original_price": 2299.99
+    },
+    {
+      "name": "Gigabyte RTX 5070 Ti Eagle",
+      "price": 739.99,
+      "shipping": 14.99,
+      "rating": 4.3,
+      "in_stock": true,
+      "original_price": 869.99
+    },
+    {
+      "name": "ASUS Prime RTX 5070",
+      "price": 609.0,
+      "shipping": 12.99,
+      "rating": 4.2,
+      "in_stock": true,
+      "original_price": 699.0
+    },
+    {
+      "name": "MSI RTX 5070 Ventus 3X",
+      "price": 639.99,
+      "shipping": 18.5,
+      "rating": 4.1,
+      "in_stock": true,
+      "original_price": 729.99
+    }
   ],
-
   "healed_swapped": [
-    {"name": "MSI RTX 5080 Gaming Trio",      "price": 19.99, "shipping": 1299.99, "rating": 4.6, "in_stock": true},
-    {"name": "ASUS TUF RTX 5080 OC",          "price": 15.00, "shipping": 1249.00, "rating": 4.5, "in_stock": true},
-    {"name": "Gigabyte RTX 5080 Aorus",       "price": 24.99, "shipping": 1399.99, "rating": 4.7, "in_stock": false},
-    {"name": "ASUS ROG Astral RTX 5090",      "price": 29.99, "shipping": 1999.00, "rating": 4.8, "in_stock": true},
-    {"name": "MSI RTX 5090 Suprim Liquid",    "price": 0.00,  "shipping": 2099.99, "rating": 4.4, "in_stock": true},
-    {"name": "Gigabyte RTX 5070 Ti Eagle",    "price": 14.99, "shipping": 749.99,  "rating": 4.3, "in_stock": true},
-    {"name": "ASUS Prime RTX 5070",           "price": 12.99, "shipping": 599.00,  "rating": 4.2, "in_stock": true},
-    {"name": "MSI RTX 5070 Ventus 3X",        "price": 18.50, "shipping": 629.99,  "rating": 4.1, "in_stock": false}
+    {
+      "name": "MSI RTX 5080 Gaming Trio",
+      "price": 19.99,
+      "shipping": 1299.99,
+      "rating": 4.6,
+      "in_stock": true,
+      "original_price": 1499.99
+    },
+    {
+      "name": "ASUS TUF RTX 5080 OC",
+      "price": 15.0,
+      "shipping": 1249.0,
+      "rating": 4.5,
+      "in_stock": true,
+      "original_price": 1449.0
+    },
+    {
+      "name": "Gigabyte RTX 5080 Aorus",
+      "price": 24.99,
+      "shipping": 1399.99,
+      "rating": 4.7,
+      "in_stock": false,
+      "original_price": 1599.99
+    },
+    {
+      "name": "ASUS ROG Astral RTX 5090",
+      "price": 29.99,
+      "shipping": 1999.0,
+      "rating": 4.8,
+      "in_stock": true,
+      "original_price": 2199.0
+    },
+    {
+      "name": "MSI RTX 5090 Suprim Liquid",
+      "price": 0.0,
+      "shipping": 2099.99,
+      "rating": 4.4,
+      "in_stock": true,
+      "original_price": 2299.99
+    },
+    {
+      "name": "Gigabyte RTX 5070 Ti Eagle",
+      "price": 14.99,
+      "shipping": 749.99,
+      "rating": 4.3,
+      "in_stock": true,
+      "original_price": 869.99
+    },
+    {
+      "name": "ASUS Prime RTX 5070",
+      "price": 12.99,
+      "shipping": 599.0,
+      "rating": 4.2,
+      "in_stock": true,
+      "original_price": 699.0
+    },
+    {
+      "name": "MSI RTX 5070 Ventus 3X",
+      "price": 18.5,
+      "shipping": 629.99,
+      "rating": 4.1,
+      "in_stock": false,
+      "original_price": 729.99
+    }
+  ],
+  "healed_swapped_original": [
+    {
+      "name": "MSI RTX 5080 Gaming Trio",
+      "price": 1499.99,
+      "shipping": 19.99,
+      "rating": 4.6,
+      "in_stock": true,
+      "original_price": 1299.99
+    },
+    {
+      "name": "ASUS TUF RTX 5080 OC",
+      "price": 1449.0,
+      "shipping": 15.0,
+      "rating": 4.5,
+      "in_stock": true,
+      "original_price": 1249.0
+    },
+    {
+      "name": "Gigabyte RTX 5080 Aorus",
+      "price": 1599.99,
+      "shipping": 24.99,
+      "rating": 4.7,
+      "in_stock": false,
+      "original_price": 1399.99
+    },
+    {
+      "name": "ASUS ROG Astral RTX 5090",
+      "price": 2199.0,
+      "shipping": 29.99,
+      "rating": 4.8,
+      "in_stock": true,
+      "original_price": 1999.0
+    },
+    {
+      "name": "MSI RTX 5090 Suprim Liquid",
+      "price": 2299.99,
+      "shipping": 0.0,
+      "rating": 4.4,
+      "in_stock": true,
+      "original_price": 2099.99
+    },
+    {
+      "name": "Gigabyte RTX 5070 Ti Eagle",
+      "price": 869.99,
+      "shipping": 14.99,
+      "rating": 4.3,
+      "in_stock": true,
+      "original_price": 749.99
+    },
+    {
+      "name": "ASUS Prime RTX 5070",
+      "price": 699.0,
+      "shipping": 12.99,
+      "rating": 4.2,
+      "in_stock": true,
+      "original_price": 599.0
+    },
+    {
+      "name": "MSI RTX 5070 Ventus 3X",
+      "price": 729.99,
+      "shipping": 18.5,
+      "rating": 4.1,
+      "in_stock": false,
+      "original_price": 629.99
+    }
   ]
 }

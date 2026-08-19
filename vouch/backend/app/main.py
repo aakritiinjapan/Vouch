@@ -41,5 +41,6 @@ def health() -> dict:
     return {"status": "ok", "service": "vouch"}
 
 
-# from app.api import routes
-# app.include_router(routes.router)
+from app.api import routes  # noqa: E402  (imported after app creation by design)
+
+app.include_router(routes.router)
