@@ -75,12 +75,22 @@ export function PriceChart({ points, counterfactual, showCounterfactual = false 
     <figure className="m-0">
       <svg viewBox={`0 0 ${W} ${H}`} className="w-full" role="img"
            aria-label="Our price against the confirmed competitor price over time">
+        <defs>
+          {/* Hatching, not a grey wash. A flat tint reads as "shaded region"; hatching reads as
+              "nothing was recorded here", which is the whole point of the gap. */}
+          <pattern id="unverified-hatch" width="7" height="7" patternUnits="userSpaceOnUse"
+                   patternTransform="rotate(45)">
+            <rect width="7" height="7" fill="transparent" />
+            <line x1="0" y1="0" x2="0" y2="7" stroke="#ff6b4a" strokeWidth="1.4" opacity="0.22" />
+          </pattern>
+        </defs>
+
         {/* gridlines stay solid hairlines - dashed gridlines are the anti-pattern, dashed data is not */}
         {[0, 0.5, 1].map((t) => {
           const gy = PAD.top + innerH * t;
           return (
             <line key={t} x1={PAD.left} x2={PAD.left + innerW} y1={gy} y2={gy}
-                  stroke="#2c2c2a" strokeWidth="1" />
+                  stroke="#222e33" strokeWidth="1" />
           );
         })}
 
@@ -95,34 +105,45 @@ export function PriceChart({ points, counterfactual, showCounterfactual = false 
                 (innerW / (points.length - 1))
               }
               height={innerH}
-              fill="#898781"
-              opacity="0.08"
+              fill="url(#unverified-hatch)"
+              stroke="#33434a"
+              strokeWidth="1"
+              strokeDasharray="3 3"
             />
+            {/* Anchored to whichever edge of the band keeps the label inside the plot. The gap is
+                usually the most recent cycle, so a left-anchored label runs off the right edge. */}
             <text
-              x={x(Math.min(...gapIndexes)) + 4}
+              x={
+                x(Math.min(...gapIndexes)) > PAD.left + innerW * 0.5
+                  ? x(Math.max(...gapIndexes)) + innerW / (points.length - 1) / 2
+                  : x(Math.min(...gapIndexes)) + 4
+              }
               y={PAD.top + innerH + 17}
-              className="fill-ink-muted text-[9px]"
+              textAnchor={
+                x(Math.min(...gapIndexes)) > PAD.left + innerW * 0.5 ? "end" : "start"
+              }
+              className="fill-status-critical text-[9px] font-medium"
             >
-              unverified
+              unverified — no line drawn
             </text>
           </>
         )}
 
         {/* competitor: context, deliberately de-emphasised */}
         {segments.map((seg, k) => (
-          <path key={k} d={line(seg)} fill="none" stroke="#898781" strokeWidth="2"
+          <path key={k} d={line(seg)} fill="none" stroke="#6b8189" strokeWidth="2"
                 strokeLinecap="round" />
         ))}
         {lastConfirmed && (
           <circle cx={x(lastConfirmed.i)} cy={y(lastConfirmed.v)} r="3.5"
-                  fill="#0d0d0d" stroke="#898781" strokeWidth="2" />
+                  fill="#080d0f" stroke="#6b8189" strokeWidth="2" />
         )}
 
         {/* our price: the emphasis series */}
-        <path d={line(ourSeries)} fill="none" stroke="#3987e5" strokeWidth="2"
+        <path d={line(ourSeries)} fill="none" stroke="#57b8e0" strokeWidth="2"
               strokeLinecap="round" />
         <circle cx={x(points.length - 1)} cy={y(points.at(-1)!.my_price)} r="4"
-                fill="#3987e5" stroke="#0d0d0d" strokeWidth="2" />
+                fill="#57b8e0" stroke="#080d0f" strokeWidth="2" />
         <text x={x(points.length - 1) + 8} y={y(points.at(-1)!.my_price) + 4}
               className="fill-ink text-[10px]">
           {money(points.at(-1)!.my_price, 0)}
@@ -136,11 +157,11 @@ export function PriceChart({ points, counterfactual, showCounterfactual = false 
                 points.length - 1,
               ).toFixed(1)},${y(cfPrice).toFixed(1)}`}
               fill="none"
-              stroke="#d03b3b"
+              stroke="#ff6b4a"
               strokeWidth="2"
               strokeDasharray="5 4"
             />
-            <circle cx={x(points.length - 1)} cy={y(cfPrice)} r="4" fill="#d03b3b" />
+            <circle cx={x(points.length - 1)} cy={y(cfPrice)} r="4" fill="#ff6b4a" />
             <text x={x(points.length - 1) + 8} y={y(cfPrice) + 4}
                   className="fill-status-critical text-[10px]">
               {money(cfPrice, 0)}
@@ -162,7 +183,7 @@ export function PriceChart({ points, counterfactual, showCounterfactual = false 
               className="inline-block h-0.5 w-4 rounded"
               style={{
                 backgroundImage:
-                  "repeating-linear-gradient(90deg,#d03b3b 0 5px,transparent 5px 9px)",
+                  "repeating-linear-gradient(90deg,#ff6b4a 0 5px,transparent 5px 9px)",
               }}
             />
             if we had auto-approved

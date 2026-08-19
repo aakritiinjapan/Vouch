@@ -2,6 +2,7 @@
 
 import type {
   ApproveResponse,
+  DemoHints,
   BulkApproveResponse,
   CycleRunResponse,
   HealEvent,
@@ -85,6 +86,9 @@ export const api = {
       method: "POST",
       body: JSON.stringify(body),
     }),
+
+  /** Which replay scenarios the active dataset can actually honour. */
+  demoHints: () => request<DemoHints>("/demo/hints"),
 
   resetDemo: () => request<Record<string, unknown>>("/demo/reset", { method: "POST" }),
 };
