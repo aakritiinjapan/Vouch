@@ -1,8 +1,19 @@
+# Backend runtime
 fastapi>=0.115
 uvicorn[standard]>=0.32
 sqlmodel>=0.0.22
 pydantic-settings>=2.5
-httpx>=0.27
+
+# Tier 3 LLM judge (guardian/judge.py). Optional at runtime: without ANTHROPIC_API_KEY the
+# judge short-circuits and the deterministic tiers stand on their own.
 anthropic>=0.40
-brightdata-sdk>=0.2
+
+# Tests
 pytest>=8.3
+httpx>=0.27          # required by fastapi.testclient
+
+# NOT a dependency, deliberately:
+#   brightdata-sdk  - exposes only run/trigger/status on scraper_studio, so it CANNOT drive the
+#                     heal loop (heal / approve / reject). We shell out to the CLI instead.
+#   @brightdata/cli - a Node package, invoked via `npx -y @brightdata/cli` (needs Node 20+).
+#                     Only required when MOCK_MODE=false.

@@ -1,0 +1,17 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html {
+    color-scheme: dark;
+  }
+  body {
+    @apply bg-plane text-ink font-sans antialiased;
+  }
+  /* Proportional figures by default; tabular-nums is applied only inside price tables, where
+     column alignment matters more than natural spacing. */
+  .num-tabular {
+    font-variant-numeric: tabular-nums;
+  }
+}

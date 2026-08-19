@@ -1,37 +1,51 @@
 """
-Thin wrapper around Bright Data Scraper Studio — the ONE external system Vouch depends on.
+Thin wrapper around Bright Data Scraper Studio - the ONE external system Vouch depends on.
 
-Real surface (confirmed against the Bright Data CLI / docs, Aug 2026):
+The CLI is the primary surface, not a fallback. The Python SDK (brightdata-sdk) exposes only
+run/trigger/status on scraper_studio - it has no heal, approve, or reject - so the heal loop can only
+be driven through `@brightdata/cli` or the raw /dca/ REST calls.
 
-    brightdata login
-    brightdata scraper create <url> "<natural-language field description>"   -> returns collector_id (c_*)
-    brightdata scraper run    <collector_id> <url> --json
-    brightdata scraper heal   <collector_id> "<prompt>" --url <url> -o heal.json   (stops at approval gate)
-    brightdata scraper approve                                                     (commits the pending heal)
+    npx @brightdata/cli login                       (or set BRIGHTDATA_API_KEY)
+    brightdata scraper create <url> "<field description>"   -> collector_id (c_*)
+    brightdata scraper run     <collector_id> <url> --sync --json
+    brightdata scraper heal    <collector_id> "<prompt>"    -> stops at the approval gate
+    brightdata scraper approve <collector_id> [--reject]
 
-  The heal loop maps to three API calls under the hood:
-    POST /dca/collectors/{id}/refactor_template   (propose)
-    GET  .../refactor_template/progress           (poll until "pending_answer")
-    POST .../resume_automation_job                (approve OR reject)
+Under the hood the heal loop is three calls:
+    POST /dca/collectors/{id}/refactor_template            (propose)
+    GET  .../refactor_template/progress                    (poll to "pending_answer")
+    POST .../resume_automation_job  {"message": true|false} (approve | reject)
 
-  The collector_id is also the handle for the Scraper Studio API and the brightdata-sdk:
-    async with BrightDataClient() as c:
-        rows = await c.scraper_studio.run(collector="c_abc", input={"url": url})
+Both of README section 6's open questions are now settled against the docs:
 
-TWO THINGS TO CONFIRM against a live collector before Phase 2 relies on them (see README §6):
-  1. that heal.json (written with --url) contains the PROPOSED rows pre-approval — the guardian
-     needs to see them to judge the heal. (Very likely yes: the human gate exists precisely so a
-     person can inspect the fix first.)
-  2. the exact reject payload for resume_automation_job.
+  1. The proposed rows ARE available pre-approval. Without --auto-approve, `heal` exits 0 with a
+     `status: "awaiting_approval"` envelope containing `preview_result` - "the sample rows the fixed
+     scraper would produce". That is what makes the whole pre-approval gate architecture possible.
+  2. Rejecting is `scraper approve <id> --reject`, i.e. resume_automation_job with
+     {"message": false}. On reject the scraper is left unchanged, so healing again with a clearer
+     prompt is safe - which is what the orchestrator's re-prompt loop relies on.
+
+Two things worth knowing that are easy to trip over:
+  - `--url` on `heal` is cosmetic. The docs state it is woven into the success `next_step` hint and
+    is not sent to the heal call itself; the request body is {"prompt": ..., "custom_input": []}.
+  - The env var names differ by surface: the CLI reads BRIGHTDATA_API_KEY, the SDK reads
+    BRIGHTDATA_API_TOKEN. config.py carries both.
+
+Operational limits that shaped the design: Scraper Studio bills 1 credit per page load against a
+5,000/month free tier, and AI-Flow caps concurrent create/heal jobs at 3 per account (a 4th returns
+429). service.run_all_cycles is therefore deliberately serial.
 
 MOCK_MODE: when settings.mock_mode is true, every function reads from tests/fixtures/sample_runs.json
-instead of calling Bright Data. This keeps development offline/deterministic and lets the demo run
-without depending on a live site breaking on cue. Build everything in mock first.
+instead of calling Bright Data. This keeps development offline and deterministic and lets the demo run
+without depending on a live site breaking on cue. Build and rehearse in mock; qualify with a real
+collector.
 """
 
 from __future__ import annotations
 
 import json
+import os
+import shutil
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
@@ -41,12 +55,23 @@ from app.config import settings
 
 _FIXTURES = Path(__file__).resolve().parents[2] / "tests" / "fixtures" / "sample_runs.json"
 
+# The CLI rejects anything longer, with a 400 "Invalid description" - AFTER it has already created
+# the template, leaving an orphan collector behind.
+MAX_DESCRIPTION_CHARS = 500
+
 
 @dataclass
 class HealProposal:
     collector_id: str
     proposed_records: list[dict]     # what the healed collector would return (for the guardian to judge)
     pending: bool = True             # sitting at the approval gate, not yet committed
+    diff_summary: str = ""           # the CLI's one-line summary; the structured diff is API-only
+    view_url: str = ""               # the Scraper Studio page for this collector
+    # True when proposed_records is a PREVIEW SAMPLE rather than a full run. The real gate always
+    # returns a sample (measured: 1 row against a 96-row baseline). The mock fixture is a full-size
+    # stand-in, so it is not one - and the guardian has to know the difference, or it reports the
+    # preview size as a finding.
+    is_sample: bool = False
 
 
 # --------------------------------------------------------------------------------------
@@ -62,64 +87,262 @@ def _fixture(key: str) -> list[dict]:
 # Public API
 # --------------------------------------------------------------------------------------
 
-def run(collector_id: str, url: str) -> list[dict]:
-    """Run a collector against a URL and return the extracted rows."""
+def create_collector(url: str, description: str, *, name: Optional[str] = None,
+                     timeout: Optional[int] = None) -> str:
+    """Create a Scraper Studio collector from a URL and a natural-language field description.
+
+    Returns the c_* collector id. This is the step the submission rules require: a custom scraper
+    built with Scraper Studio, not one pulled from the Scrapers Library.
+
+    Write the description PRECISELY. This first extraction becomes the guardian's baseline, so an
+    ambiguous description here poisons the reference every later heal is judged against - see
+    docs/DEMO_SCRIPT.md, technique C.
+    """
+    if len(description) > MAX_DESCRIPTION_CHARS:
+        # Validate locally. `scraper create` creates the template FIRST and only then starts AI
+        # generation, so a rejected description leaves a half-built collector behind that Bright Data
+        # exposes no way to delete programmatically. Failing here costs nothing.
+        raise ValueError(
+            f"description is {len(description)} chars; the CLI accepts at most "
+            f"{MAX_DESCRIPTION_CHARS}. Tighten it - a shorter, plainer description also tends to "
+            f"generate a better scraper."
+        )
+
+    if settings.mock_mode:
+        return "c_mock_newegg_gpu"
+
+    args = ["scraper", "create", url, description, "--json"]
+    if name:
+        args += ["--name", name]
+    if timeout:
+        args += ["--timeout", str(timeout)]
+    envelope = json.loads(_cli(*args))
+    collector_id = envelope.get("collector_id")
+    if not collector_id:
+        raise RuntimeError(f"scraper create returned no collector_id: {envelope}")
+    return collector_id
+
+
+def run(collector_id: str, url: str, _simulate: Optional[str] = None) -> list[dict]:
+    """Run a collector against a URL and return the extracted rows.
+
+    _simulate (mock only): 'run_degraded' returns a run with price null on 6/8 rows, so the
+    guardian's degradation check fires on real data and the heal is triggered by a measured fact
+    rather than by a string we typed. Ignored entirely outside MOCK_MODE.
+    """
     if settings.mock_mode:
         # in mock, the "current" run is the baseline (healthy) unless a break is simulated
-        return _fixture("baseline")
+        return _fixture(_simulate or "baseline")
 
-    # --- real path (pick ONE; SDK shown, CLI fallback commented) -----------------------
-    # from brightdata import BrightDataClient   # brightdata-sdk
-    # async def _go():
-    #     async with BrightDataClient() as c:
-    #         return await c.scraper_studio.run(collector=collector_id, input={"url": url})
-    # return asyncio.run(_go())
-    out = _cli("scraper", "run", collector_id, url, "--json")
-    return json.loads(out)
+    # --sync keeps a single-URL run in one request; the CLI falls back to async past its server cap.
+    out = _cli("scraper", "run", collector_id, url, "--sync", "--json")
+    payload = json.loads(out)
+    return _rows(payload)
 
 
 def propose_heal(collector_id: str, prompt: str, url: str,
                  _simulate: Optional[str] = None) -> HealProposal:
     """
-    Trigger a self-heal. Returns the PROPOSED rows without committing (heal stops at the gate).
+    Trigger a self-heal and return the PROPOSED rows without committing it.
 
-    _simulate (mock only): 'healed_good' | 'healed_swapped' — which fixture the fake heal returns,
+    This function is the whole architectural thesis. Without `--auto-approve`, `heal` stops at the
+    approval gate and exits 0 with a `status: "awaiting_approval"` envelope whose `preview_result`
+    holds the sample rows the fixed scraper WOULD produce. That is what the guardian judges.
+
+    Note what this buys us: Scraper Studio's own UI shows only the code diff on Accept/Decline - the
+    sample rows are surfaced by the CLI/API path alone. So Vouch validates data that Bright Data's
+    approval screen cannot show a human.
+
+    We never pass --auto-approve. It exists, and it commits without the gate; using it would delete
+    the thing this product is.
+
+    _simulate (mock only): 'healed_good' | 'healed_swapped' - which fixture the fake heal returns,
     so the demo can deterministically produce either a clean heal or the dangerous swap.
     """
     if settings.mock_mode:
         key = _simulate or "healed_good"
         return HealProposal(collector_id=collector_id, proposed_records=_fixture(key), pending=True)
 
-    heal_out = Path("heal.json")
-    _cli("scraper", "heal", collector_id, prompt, "--url", url, "-o", str(heal_out))
-    proposed = json.loads(heal_out.read_text())   # ⚠️ confirm this carries proposed rows (README §6)
-    return HealProposal(collector_id=collector_id, proposed_records=proposed, pending=True)
+    # --url is cosmetic on `heal` (the docs note it is woven into the next_step hint, not sent to the
+    # heal call), but passing it keeps the CLI's suggested follow-up command correct.
+    out = _cli("scraper", "heal", collector_id, prompt, "--url", url, "--json")
+    envelope = json.loads(out)
+
+    status = envelope.get("status")
+    if status != "awaiting_approval":
+        raise RuntimeError(
+            f"heal did not stop at the approval gate (status={status!r}). Vouch cannot validate a "
+            f"heal that has already been committed - check that --auto-approve was not passed."
+        )
+
+    proposed = envelope.get("preview_result")
+    if proposed is None:
+        raise RuntimeError(
+            f"heal envelope carried no preview_result, so there are no proposed rows to validate: "
+            f"{sorted(envelope)}"
+        )
+
+    return HealProposal(collector_id=collector_id, proposed_records=_rows(proposed),
+                        pending=True, diff_summary=envelope.get("diff_summary", ""),
+                        view_url=envelope.get("view_url", ""), is_sample=True)
 
 
 def approve_heal(collector_id: str) -> None:
-    """Commit the pending heal (same collector_id keeps working, now fixed)."""
+    """Commit the pending heal. The collector id is unchanged - it keeps working, now fixed."""
     if settings.mock_mode:
         return
-    _cli("scraper", "approve")
+    _cli("scraper", "approve", collector_id, "--json")
 
 
 def reject_heal(collector_id: str) -> None:
-    """Discard the pending heal; the old collector is retained."""
+    """Discard the pending heal; the previous collector is retained and stays operational.
+
+    Rejecting rather than leaving the gate open is what makes a retry safe: Bright Data leaves the
+    scraper unchanged on reject, so the orchestrator can immediately heal again with a sharper prompt.
+    """
     if settings.mock_mode:
         return
-    # exact reject payload for resume_automation_job — confirm against docs (README §6)
-    _cli("scraper", "approve", "--reject")   # placeholder flag; verify real syntax
+    _cli("scraper", "approve", collector_id, "--reject", "--json")
+
+
+# Keys Scraper Studio adds that are not extracted data.
+_META_KEYS = frozenset({"input", "timestamp", "error", "error_code", "warning", "warnings"})
+
+# The storefront we price against. Newegg's .ca site does not redirect to .com and serves a different
+# catalogue in CAD, so a proxy-region change could silently poison price history with the wrong
+# currency. Refusing is the only safe response: a guardian that accepts CAD as USD is worse than one
+# that stops.
+EXPECTED_CURRENCY = "USD"
+
+
+def _scalarise(value: object) -> object:
+    """Reduce a money object to its number.
+
+    Scraper Studio returns prices as {"value": 299.99, "currency": "USD", "symbol": "$"}. The guardian
+    profiles scalars, so unwrap here rather than teaching every check about the wrapper.
+    """
+    if isinstance(value, dict):
+        for key in ("value", "amount", "price"):
+            candidate = value.get(key)
+            if isinstance(candidate, (int, float)) and not isinstance(candidate, bool):
+                return candidate
+    return value
+
+
+def _currencies(payload: object) -> set[str]:
+    """Every currency code appearing anywhere in the payload."""
+    found: set[str] = set()
+    if isinstance(payload, dict):
+        code = payload.get("currency")
+        if isinstance(code, str) and code:
+            found.add(code)
+        for value in payload.values():
+            found |= _currencies(value)
+    elif isinstance(payload, list):
+        for item in payload:
+            found |= _currencies(item)
+    return found
+
+
+def _flatten(rows: list[dict]) -> list[dict]:
+    """Normalise Scraper Studio rows into one flat dict per product.
+
+    The AI names its container after whatever it found - `graphics_cards`, `products`, `items` - nests
+    each product inside it, and echoes the request back as `input`. None of that is wrong, it simply is
+    not the flat shape the guardian profiles. Normalising in one place keeps the checks unaware of it.
+
+    Fields on the outer row that are NOT the container (e.g. `product_page_url`) are carried onto each
+    product, since they describe it.
+    """
+    out: list[dict] = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+
+        payload = {k: v for k, v in row.items() if k not in _META_KEYS}
+        containers = [v for v in payload.values()
+                      if isinstance(v, list) and v and all(isinstance(i, dict) for i in v)]
+        carried = {k: _scalarise(v) for k, v in payload.items()
+                   if not (isinstance(v, list) and v and all(isinstance(i, dict) for i in v))}
+
+        if not containers:
+            out.append(carried)
+            continue
+
+        for container in containers:
+            for item in container:
+                merged = dict(carried)
+                merged.update({k: _scalarise(v) for k, v in item.items() if k not in _META_KEYS})
+                out.append(merged)
+    return out
+
+
+def _rows(payload: object) -> list[dict]:
+    """Turn whatever a CLI envelope wrapped the rows in into flat dicts the guardian can profile.
+
+    The run and heal envelopes differ and have both changed shape across CLI releases, so accept a
+    bare list or any of the documented wrapper keys rather than guessing one and breaking on the day.
+    """
+    seen = _currencies(payload)
+    unexpected = {c for c in seen if c.upper() != EXPECTED_CURRENCY}
+    if unexpected:
+        raise RuntimeError(
+            f"collector returned prices in {', '.join(sorted(unexpected))} but this catalogue is "
+            f"priced in {EXPECTED_CURRENCY}. The collector is almost certainly reading a different "
+            f"regional storefront - pin the host and the proxy region before trusting these numbers."
+        )
+
+    if isinstance(payload, list):
+        raw = [r for r in payload if isinstance(r, dict)]
+    elif isinstance(payload, dict):
+        raw = None
+        for key in ("preview_result", "result", "results", "data", "rows", "records"):
+            if isinstance(payload.get(key), list):
+                raw = [r for r in payload[key] if isinstance(r, dict)]
+                break
+        if raw is None:
+            raise RuntimeError(f"could not find extracted rows in CLI output: {sorted(payload)}")
+    else:
+        raise RuntimeError(f"could not find extracted rows in CLI output: {type(payload).__name__}")
+
+    return _flatten(raw)
 
 
 # --------------------------------------------------------------------------------------
 # internals
 # --------------------------------------------------------------------------------------
 
+def _npx() -> list[str]:
+    """Resolve the npx launcher to an absolute path.
+
+    On Windows npx is a .cmd shim, and subprocess cannot exec it by bare name - you get
+    FileNotFoundError even with Node installed. Resolving it explicitly is safer than shell=True,
+    which would put a heal prompt through shell quoting.
+    """
+    candidates = ("npx.cmd", "npx.exe", "npx") if os.name == "nt" else ("npx",)
+    for name in candidates:
+        found = shutil.which(name)
+        if found:
+            return [found]
+    raise RuntimeError(
+        "npx not found on PATH. The Bright Data CLI is the only surface that can drive the heal "
+        "loop (the Python SDK exposes run/trigger/status only), so Node 20+ is required when "
+        "MOCK_MODE=false. Install Node, or set MOCK_MODE=true to run against fixtures."
+    )
+
+
 def _cli(*args: str) -> str:
-    """Invoke the Bright Data CLI. Runs unchanged inside a coding-agent terminal; uses npx so
-    there's nothing to install globally."""
-    cmd = ["npx", "@brightdata/cli", *args]
-    proc = subprocess.run(cmd, capture_output=True, text=True)
+    """Invoke the Bright Data CLI.
+
+    Uses npx so there is nothing to install globally, which is also what Bright Data's own docs
+    recommend for coding agents. The CLI authenticates from `brightdata login` credentials or
+    BRIGHTDATA_API_KEY; note the Python SDK reads a differently-named BRIGHTDATA_API_TOKEN.
+    """
+    cmd = [*_npx(), "-y", "@brightdata/cli", *args]
+    env = dict(os.environ)
+    if settings.brightdata_api_key:
+        env.setdefault("BRIGHTDATA_API_KEY", settings.brightdata_api_key)
+    proc = subprocess.run(cmd, capture_output=True, text=True, env=env)
     if proc.returncode != 0:
         raise RuntimeError(f"brightdata {' '.join(args)} failed: {proc.stderr.strip()}")
     return proc.stdout

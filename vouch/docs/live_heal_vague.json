@@ -1,0 +1,54 @@
+{
+  "_comment": "A real Scraper Studio heal, captured at the approval gate before any commit, with the guardian's verdict on it. Produced by scripts/live_heal.py.",
+  "collector_id": "c_mszq0z1x27brru3wab",
+  "prompt": "the price field looks wrong, re-capture the price near the delivery info",
+  "gate_status": "awaiting_approval",
+  "diff_summary": "proposed template has 2 step(s) \u00e2\u20ac\u201d review at view_url",
+  "guardian": {
+    "decision": "review",
+    "confidence": 70,
+    "brief": "Couldn't fully confirm this source. Row count changed from 96 to 1.",
+    "failures": [
+      {
+        "code": "ROW_COUNT_SHIFT",
+        "severity": "medium",
+        "field": "__run__",
+        "message": "Row count changed from 96 to 1.",
+        "evidence": {
+          "baseline": 96,
+          "proposed": 1
+        }
+      },
+      {
+        "code": "CARDINALITY_COLLAPSE",
+        "severity": "medium",
+        "field": "product_page_url",
+        "message": "'product_page_url' went from 96 distinct values to 1 \u2014 it may now be pinned to a static element.",
+        "evidence": {
+          "baseline_cardinality": 96,
+          "proposed_cardinality": 1
+        }
+      },
+      {
+        "code": "CARDINALITY_COLLAPSE",
+        "severity": "medium",
+        "field": "name",
+        "message": "'name' went from 96 distinct values to 1 \u2014 it may now be pinned to a static element.",
+        "evidence": {
+          "baseline_cardinality": 96,
+          "proposed_cardinality": 1
+        }
+      }
+    ]
+  },
+  "preview_result": [
+    {
+      "product_page_url": "https://www.newegg.com/sapphire-tech-pulse-11350-...16gb-graphics-card-double-fans/p/N82E16814202457",
+      "name": "SAPPHIRE PULSE Radeon RX 9060 XT 16GB GDDR6 PCI Express 5.0 x16 ATX Graphics Card 11350-03-20G",
+      "price": 519.99,
+      "shipping": 0,
+      "rating": 4,
+      "in_stock": true
+    }
+  ]
+}
