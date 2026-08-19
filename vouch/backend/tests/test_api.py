@@ -25,9 +25,11 @@ COLLECTOR = "c_mock_newegg_gpu"
 
 SEED = [
     dict(sku="GPU-5080-MSI", name="MSI RTX 5080 Gaming Trio", my_price=1319.00, cost=1050.00,
-         floor_margin=0.08, competitor_url="https://example.com/newegg-mirror/rtx-5080-msi"),
+         floor_margin=0.08, competitor_url="https://example.com/newegg-mirror/rtx-5080-msi",
+         seed_price=1319.00),
     dict(sku="GPU-5090-ASUS", name="ASUS ROG Astral RTX 5090", my_price=2049.00, cost=1650.00,
-         floor_margin=0.08, competitor_url="https://example.com/newegg-mirror/rtx-5090-asus"),
+         floor_margin=0.08, competitor_url="https://example.com/newegg-mirror/rtx-5090-asus",
+         seed_price=2049.00),
 ]
 
 

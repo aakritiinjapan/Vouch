@@ -30,6 +30,15 @@ class Settings(BaseSettings):
     mock_mode: bool = True                       # run without Bright Data / Anthropic
     database_url: str = f"sqlite:///{DB_PATH.as_posix()}"
 
+    # Which fixture MOCK_MODE replays, by basename under backend/tests/fixtures/.
+    #
+    # 'newegg_live' is derived from the real collector's 96-row run (see
+    # scripts/build_demo_fixture.py), so the demo shows real products, real prices and
+    # newegg.com as the source. 'sample_runs' is the smaller hand-written set that also carries
+    # original_price, which the live collector did not capture - the test suite pins itself to it
+    # via tests/conftest.py so the guardian's value-ordering tier stays covered.
+    demo_dataset: str = "newegg_live"
+
     # Bright Data exposes the same credential under two names on two surfaces:
     #   brightdata_api_key   -> the CLI (@brightdata/cli), which is the ONLY surface that can
     #                           drive the heal loop (heal / approve / reject).

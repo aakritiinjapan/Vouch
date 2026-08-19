@@ -25,7 +25,7 @@ uvicorn app.main:app --reload   # http://127.0.0.1:8000  (/docs for the API)
 npm install && npm run dev      # http://127.0.0.1:5173, proxies /api to the backend
 
 # tests  (from vouch/backend)
-pytest -q                       # 174 tests
+pytest -q                       # 181 tests
 ```
 
 Everything defaults to offline operation — no Bright Data or Anthropic credentials are required.

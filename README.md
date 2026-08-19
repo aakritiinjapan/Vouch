@@ -166,7 +166,7 @@ product, not a rail bolted on afterwards.
 ## Tests
 
 ```bash
-cd vouch/backend && pytest -q     # 174 tests
+cd vouch/backend && pytest -q     # 181 tests
 ```
 
 The suite covers the guardian's four tiers, the orchestrator's retry loop with no database, the
@@ -248,7 +248,7 @@ Vouch/
     │   │   ├── api/              routes.py · schemas.py
     │   │   └── models.py         Product · Baseline · RepriceProposal · HealEvent
     │   ├── scripts/              seed · reset_db · create_collector · live_heal
-    │   └── tests/                174 tests
+    │   └── tests/                181 tests
     ├── frontend/                 React + Vite + TypeScript dashboard
     └── docs/
         ├── BRIGHT_DATA_NOTES.md  Scraper Studio traps, measured against the live API

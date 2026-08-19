@@ -7,7 +7,7 @@ Idempotent: re-running updates the seeded products in place rather than duplicat
 seed as often as you like while iterating.
 
 On the price history below: a pre-populated demo database is normal and honest - without it the chart
-has two points and looks broken. What README section 7 forbids is inventing continuity at RUNTIME,
+has two points and looks broken. What we will not do is invent continuity at RUNTIME,
 i.e. drawing a straight line across a cycle whose source the guardian could not confirm. These rows
 are real observations we are stating up front are seed data; the gap the demo punches in them later
 is real.
@@ -32,42 +32,38 @@ from app.models import CompetitorObservation, Product, _now
 from app.scraper import baseline as baseline_capture
 from app.scraper.brightdata import _fixture
 
-# All SKUs are read from one competitor listing page, so they legitimately share one collector - and
-# therefore one baseline.
-DEMO_COLLECTOR_ID = "c_mock_newegg_gpu"
-
 # The real collector, created by scripts/create_collector.py against Newegg's GPU category page.
-LIVE_COLLECTOR_ID = "c_mszq0z1x27brru3wab"
+# All SKUs are read from that one listing page, so they legitimately share one collector - and
+# therefore one baseline.
+COLLECTOR_ID = "c_mszq0z1x27brru3wab"
 LIVE_URL = "https://www.newegg.com/GPUs-Video-Graphics-Cards/SubCategory/ID-48?PageSize=96"
 
-# Two product sets, because the two modes match against different data and neither should pretend to
-# be the other:
+# Every name below is a row the live collector actually returned, verified to identify EXACTLY ONE
+# row in that run. That matters: Newegg lists several near-identical variants of the same card, and
+# orchestrator._extract_competitor_price correctly refuses to guess between them - so a name matching
+# more than one row yields no price at all, which looks like a bug on stage.
 #
-#   DEMO_PRODUCTS names match tests/fixtures/sample_runs.json, which is labelled demo data.
-#   LIVE_PRODUCTS names match rows the real collector actually returned (see docs/sample_output.json).
+# The first two carry $19.99 shipping in the real data, which is what makes the swap demo land: a
+# heal that reads the shipping element instead of the price element reports that a $6,900 card now
+# sells for $19.99. The third ships free, so the same swap reports $0.00 - the failure is total, and
+# we show it that way rather than cherry-picking only the dramatic rows.
 #
-# Every LIVE name below was verified to identify EXACTLY ONE row in that run. That matters: Newegg
-# lists four near-identical "MSI Ventus GeForce RTX 5070 Ti" variants at $1179.99, $1698 and
-# $1199.99, and orchestrator._extract_competitor_price correctly refuses to guess between them - so a
-# name that matches several rows yields no price at all, which looks like a bug on stage.
+# Costs are illustrative; a real seller supplies their own. They are chosen so the floor sits
+# meaningfully below the competitor price, which is what makes the counterfactual's clamp visible
+# rather than academic.
 DEMO_PRODUCTS = [
-    dict(sku="GPU-5080-MSI", name="MSI RTX 5080 Gaming Trio", my_price=1319.00, cost=1050.00,
-         floor_margin=0.08, competitor_url="https://example.com/newegg-mirror/rtx-5080-msi"),
-    dict(sku="GPU-5090-ASUS", name="ASUS ROG Astral RTX 5090", my_price=2049.00, cost=1650.00,
-         floor_margin=0.08, competitor_url="https://example.com/newegg-mirror/rtx-5090-asus"),
-    dict(sku="GPU-5070-ASUS", name="ASUS Prime RTX 5070", my_price=619.00, cost=470.00,
-         floor_margin=0.10, competitor_url="https://example.com/newegg-mirror/rtx-5070-asus"),
-]
-
-# Costs are illustrative - a real seller would supply their own. Chosen so the floor sits meaningfully
-# below the competitor price, which is what makes the counterfactual's clamp visible.
-LIVE_PRODUCTS = [
-    dict(sku="GPU-5080-AERO", name="GIGABYTE AERO GeForce RTX 5080",
-         my_price=1779.00, cost=1420.00, floor_margin=0.08, competitor_url=LIVE_URL),
-    dict(sku="GPU-5080-AORUS", name="GIGABYTE AORUS GeForce RTX 5080",
-         my_price=1629.00, cost=1300.00, floor_margin=0.08, competitor_url=LIVE_URL),
-    dict(sku="GPU-5080-SHADOW", name="MSI SHADOW GeForce RTX 5080",
-         my_price=1609.00, cost=1285.00, floor_margin=0.10, competitor_url=LIVE_URL),
+    dict(sku="GPU-5090-ZOTAC",
+         name="ZOTAC ARCTICSTORM AIO GeForce RTX 5090 32GB GDDR7 PCI Express 5.0 x16 ATX Graphics "
+              "Card RTX 5090 ARCTICSTORM AIO",
+         my_price=6999.00, cost=5600.00, floor_margin=0.08, competitor_url=LIVE_URL),
+    dict(sku="GPU-5090-MSI",
+         name="MSI Gaming GeForce RTX 5090 32GB GDDR7 PCI Express 5.0 Graphics Card RTX 5090 32G "
+              "GAMING TRIO OC",
+         my_price=4779.00, cost=3820.00, floor_margin=0.08, competitor_url=LIVE_URL),
+    dict(sku="GPU-5090-ASUS",
+         name="ASUS ROG Astral GeForce RTX 5090 32GB GDDR7 OC Edition ROG-ASTRAL-RTX5090-O32G-"
+              "GAMING DLSS 4.0 PCI Express 5.0 Graphics Card",
+         my_price=4899.00, cost=3900.00, floor_margin=0.10, competitor_url=LIVE_URL),
 ]
 
 # eight days of plausible competitor movement, as a multiplier on the fixture's price
@@ -86,7 +82,8 @@ def _assert_names_match_fixture(products: list[dict], rows: list[dict]) -> None:
     if missing:
         raise SystemExit(
             f"seed aborted: no fixture row matches the product name for {', '.join(missing)}.\n"
-            f"Product.name must match a 'name' in tests/fixtures/sample_runs.json exactly."
+            f"Product.name must match a 'name' in the active dataset "
+            f"(tests/fixtures/{settings.demo_dataset}.json) exactly."
         )
 
 
@@ -95,11 +92,13 @@ def _upsert_products(session, specs: list[dict], collector_id: str) -> list[Prod
     for spec in specs:
         existing = session.exec(select(Product).where(Product.sku == spec["sku"])).first()
         if existing is None:
-            existing = Product(**spec, collector_id=collector_id)
+            existing = Product(**spec, collector_id=collector_id,
+                               seed_price=spec["my_price"])
         else:
             for key, value in spec.items():
                 setattr(existing, key, value)
             existing.collector_id = collector_id
+            existing.seed_price = spec["my_price"]
         existing.updated_at = _now()
         session.add(existing)
         products.append(existing)
@@ -143,27 +142,15 @@ def _seed_history(session, products: list[Product], rows: list[dict]) -> int:
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--live", action="store_true",
-                        help="seed the products that match the REAL collector's rows, and point them "
-                             "at it, instead of the fixture-matching demo products")
-    args = parser.parse_args(argv)
+    parser.parse_args(argv)
 
     init_db()
-    specs = LIVE_PRODUCTS if args.live else DEMO_PRODUCTS
-    collector_id = LIVE_COLLECTOR_ID if args.live else DEMO_COLLECTOR_ID
+    specs = DEMO_PRODUCTS
     rows = _fixture("baseline")
-
-    if args.live:
-        # Against the live collector the fixture is not the reference, so there is nothing to assert
-        # here - create_collector.py already verified these names resolve to exactly one row each.
-        print("! seeding LIVE products against the real collector."
-              " MOCK_MODE must be false to run cycles against them.")
-        print()
-    else:
-        _assert_names_match_fixture(specs, rows)
+    _assert_names_match_fixture(specs, rows)
 
     with get_session() as session:
-        products = _upsert_products(session, specs, collector_id)
+        products = _upsert_products(session, specs, COLLECTOR_ID)
         product_count = len(products)
         history = _seed_history(session, products, rows)
 
@@ -177,7 +164,7 @@ def main(argv: list[str] | None = None) -> None:
 
     profiles, _ = baseline_capture.capture(rows)
     print(f"database        {settings.database_url}")
-    print(f"products        {product_count} seeded/updated (collector {collector_id})")
+    print(f"products        {product_count} seeded/updated (collector {COLLECTOR_ID})")
     print(f"price history   {history} observations written")
     print(f"baseline        id={baseline_id}, {baseline_rows} rows, fields: {', '.join(profiles)}")
     print(f"mock mode       {settings.mock_mode}")
