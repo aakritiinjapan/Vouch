@@ -11,6 +11,13 @@ WeMakeDevs), 17–23 August 2026.
 > Real output: [`vouch/docs/sample_output.json`](vouch/docs/sample_output.json) ·
 > A real heal captured at the approval gate: [`vouch/docs/live_heal_vague.json`](vouch/docs/live_heal_vague.json)
 
+![The Vouch console with three reprices held. A ZOTAC RTX 5090 shows −$951.00 per unit of margin
+protected, because the healed price of $19.99 matched the competitor's shipping column rather than
+their item price.](vouch/docs/screenshot-held.png)
+
+<sub>Three held decisions on real Newegg data. With every source confirmed, the same console is
+quiet — see [`screenshot-confirmed.png`](vouch/docs/screenshot-confirmed.png).</sub>
+
 ---
 
 ## Quickstart
@@ -161,6 +168,15 @@ hand-rolled SVG specifically so the gap cannot be smoothed over by a library def
 Approving a held proposal requires `force=true` and returns `409` without it. That refusal is the
 product, not a rail bolted on afterwards.
 
+**Investigate** opens the guardian's own working — the measured evidence behind the verdict, and the
+sharpened instruction it handed back to Scraper Studio:
+
+![The Investigate panel showing the guardian's evidence — price now matches the shipping
+distribution, median $0.00 against its own historical median of $809.99 — and the re-prompt written
+from those measurements.](vouch/docs/screenshot-evidence.png)
+
+The console runs entirely offline: no CDN fonts, no external requests, no telemetry.
+
 ---
 
 ## Tests
@@ -253,6 +269,7 @@ Vouch/
     └── docs/
         ├── BRIGHT_DATA_NOTES.md  Scraper Studio traps, measured against the live API
         ├── DEMO_SCRIPT.md        the demo walkthrough
+        ├── LIVE_CAPTURE.md       how to film the live collector and heal
         ├── MOTIVATION.md         why this problem
         ├── sample_output.json    the real 96-row collector run
         └── live_heal_vague.json  a real heal captured at the approval gate
