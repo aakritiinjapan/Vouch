@@ -1,23 +1,27 @@
 /**
- * The one screen that matters.
+ * The console, organised around one question: does anything need me right now?
  *
- * Exception-based, not a data display: the seller's job is to touch only what needs judgement. Two
- * columns — the decision queue on the left, the operator log on the right, sticky. On a projector the
- * log must never push the held card below the fold, which is why the grid is fixed at 380px rather
- * than a fraction.
+ * The previous layout answered that question four times before you reached a card — a ribbon, a row
+ * of stat tiles, a section header, then the cards — and rendered a single bad heal as three separate
+ * held decisions, because three SKUs happened to read the same collector. See docs/UX_REVIEW.md.
  *
- * The section order is not fixed. When something is held, held decisions come FIRST; routine
- * proposals are what you do when there is nothing to judge, so they should never sit above the thing
- * that needs judging.
+ * The shape now:
+ *   1. One answer. Either something needs judgement, or nothing does.
+ *   2. If something does: ONE incident per bad fix, with the remedy as its primary button.
+ *   3. Everything else — routine changes, the catalogue, the heal log — sits below, folded.
+ *
+ * Single column on purpose. The old two-column grid gave the operator log the same visual weight as
+ * the decision it was meant to be subordinate to.
  */
 
+import { useMemo } from "react";
+
+import { Catalogue } from "./components/Catalogue";
 import { HealEventLog } from "./components/HealEventLog";
-import { HeldCard } from "./components/HeldCard";
 import { Header } from "./components/Header";
-import { KpiRow } from "./components/KpiRow";
+import { IncidentCard } from "./components/IncidentCard";
 import { SafeChangesPanel } from "./components/SafeChangesPanel";
-import { StatusRibbon } from "./components/StatusRibbon";
-import { Card, EmptyState, SectionHeader } from "./components/ui/Bits";
+import { groupIntoIncidents } from "./incident";
 import { useVouch } from "./hooks/useVouch";
 
 export default function App() {
@@ -41,54 +45,13 @@ export default function App() {
   } = useVouch();
 
   const collectorId = products.find((p) => p.collector_id)?.collector_id ?? null;
+  const incidents = useMemo(() => groupIntoIncidents(held), [held]);
 
-  const heldSection = (
-    <section>
-      <div className="mb-2 flex flex-wrap items-baseline gap-x-2 px-1">
-        <h2 className="text-[13px] font-semibold tracking-tight text-ink">Held decisions</h2>
-        <span className="text-xs text-ink-muted">
-          {held.length === 0
-            ? "nothing is being withheld"
-            : `${held.length} reprice${held.length === 1 ? "" : "s"} withheld pending a verified source`}
-        </span>
-      </div>
-
-      {held.length === 0 ? (
-        <Card>
-          <EmptyState
-            title="Every source is confirmed"
-            body="Vouch holds a reprice whenever it can't stand behind the number behind it. Nothing is being withheld right now."
-          />
-        </Card>
-      ) : (
-        <div className="space-y-4">
-          {held.map((proposal) => (
-            <HeldCard
-              key={proposal.id}
-              proposal={proposal}
-              busy={mutating}
-              onApproveAnyway={(id) => approve(id, true)}
-              onSkip={(id) => reject(id, "skipped")}
-            />
-          ))}
-        </div>
-      )}
-    </section>
-  );
-
-  const routineSection = (
-    <SafeChangesPanel
-      proposals={pending}
-      loading={loading}
-      busy={mutating}
-      onApprove={approve}
-      onReject={reject}
-      onApproveAllSafe={approveAllSafe}
-    />
-  );
+  /** Re-prompt with the guardian's diagnosis and re-validate — the incident card's primary action. */
+  const refix = () => runCycle({ simulate_run: "run_degraded", simulate_heal: "healed_swapped" });
 
   return (
-    <div className="mx-auto max-w-[1240px] px-5 py-6">
+    <div className="mx-auto max-w-[900px] px-5 py-6">
       <Header
         mockMode={mockMode}
         busy={mutating}
@@ -99,7 +62,6 @@ export default function App() {
         onReplay={(healKey) =>
           runCycle({ simulate_run: "run_degraded", simulate_heal: [healKey, healKey] })
         }
-        onResume={() => runCycle({ simulate_run: "run_degraded", simulate_heal: "healed_swapped" })}
         onReset={resetDemo}
       />
 
@@ -125,81 +87,58 @@ export default function App() {
           mutating ? "pointer-events-none opacity-60 transition-opacity" : "transition-opacity"
         }
       >
-        <StatusRibbon held={held} pending={pending} products={products} />
-
-        <div className="mt-4">
-          <KpiRow products={products} pending={pending} held={held} />
-        </div>
-
-        <div className="mt-5 grid grid-cols-1 gap-5 lg:grid-cols-[minmax(0,1fr)_380px]">
-          <div className="space-y-5">
-            {held.length > 0 ? (
-              <>
-                {heldSection}
-                {routineSection}
-              </>
-            ) : (
-              <>
-                {routineSection}
-                {heldSection}
-              </>
-            )}
-
-            <Card>
-              <SectionHeader title="Catalogue" count={products.length} />
-              <div className="overflow-x-auto">
-                <table className="w-full min-w-[560px] text-xs">
-                  <thead>
-                    <tr className="border-b border-hair text-left">
-                      <th className="eyebrow whitespace-nowrap px-5 py-2 font-normal">SKU</th>
-                      <th className="eyebrow whitespace-nowrap px-3 py-2 text-right font-normal">Our price</th>
-                      <th className="eyebrow whitespace-nowrap px-3 py-2 text-right font-normal">Floor</th>
-                      <th className="eyebrow whitespace-nowrap px-3 py-2 text-right font-normal">Competitor</th>
-                      <th className="eyebrow whitespace-nowrap px-5 py-2 font-normal">Source</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-hair">
-                    {products.map((product) => (
-                      <tr key={product.id} className="hover:bg-raised/40">
-                        <td className="px-5 py-2.5">
-                          <div className="flex items-baseline gap-2">
-                            <span className="shrink-0 font-mono text-[11px] text-ink">
-                              {product.sku}
-                            </span>
-                            <span
-                              className="min-w-0 max-w-[240px] truncate text-ink-muted"
-                              title={product.name}
-                            >
-                              {product.name}
-                            </span>
-                          </div>
-                        </td>
-                        <td className="num px-3 py-2.5 text-right text-ink">
-                          ${product.my_price.toFixed(2)}
-                        </td>
-                        <td className="num px-3 py-2.5 text-right text-ink-muted">
-                          ${product.floor_price.toFixed(2)}
-                        </td>
-                        <td className="num px-3 py-2.5 text-right text-ink-secondary">
-                          {product.last_confirmed_price === null
-                            ? "—"
-                            : `$${product.last_confirmed_price.toFixed(2)}`}
-                        </td>
-                        <td className="px-5 py-2.5">
-                          {product.source_confirmed ? (
-                            <span className="text-ink-muted">{product.last_confirmed_label}</span>
-                          ) : (
-                            <span className="font-medium text-status-critical">unconfirmed</span>
-                          )}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+        {/* ---- 1. the answer ----------------------------------------------------------- */}
+        <section aria-label="What needs your judgement">
+          {incidents.length === 0 ? (
+            <div className="flex items-start gap-3 rounded-lg border border-hair bg-surface px-6 py-5">
+              <span
+                className="mt-1.5 size-2 shrink-0 rounded-full bg-status-good"
+                aria-hidden
+              />
+              <div>
+                <h2 className="text-base font-semibold text-ink">Nothing needs you</h2>
+                <p className="mt-0.5 text-sm text-ink-secondary text-pretty">
+                  {loading
+                    ? "Checking every competitor source…"
+                    : pending.length > 0
+                      ? `Every competitor source checked out. ${pending.length} routine change${pending.length === 1 ? "" : "s"} below, all inside the safe band.`
+                      : "Every competitor source checked out, and every price is already where Vouch would put it."}
+                </p>
               </div>
-            </Card>
-          </div>
+            </div>
+          ) : (
+            <div className="space-y-4">
+              {incidents.map((incident) => (
+                <IncidentCard
+                  key={incident.key}
+                  incident={incident}
+                  busy={mutating}
+                  onRefix={refix}
+                  onOverride={(id) => approve(id, true)}
+                  onSkip={(id) => reject(id, "skipped")}
+                />
+              ))}
+            </div>
+          )}
+        </section>
 
+        {/* ---- 2. the routine work, only when there is some ---------------------------- */}
+        {pending.length > 0 && (
+          <div className="mt-5">
+            <SafeChangesPanel
+              proposals={pending}
+              loading={loading}
+              busy={mutating}
+              onApprove={approve}
+              onReject={reject}
+              onApproveAllSafe={approveAllSafe}
+            />
+          </div>
+        )}
+
+        {/* ---- 3. reference, folded away ----------------------------------------------- */}
+        <div className="mt-5 space-y-3">
+          <Catalogue products={products} />
           <HealEventLog events={healEvents} />
         </div>
       </div>

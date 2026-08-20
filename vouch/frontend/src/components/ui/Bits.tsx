@@ -1,6 +1,6 @@
 /** Small shared primitives. Kept in one file so the component tree stays scannable. */
 
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 
 import { confidenceSeverity, severityBg, severityText } from "../../format";
 
@@ -190,5 +190,53 @@ export function Skeleton({ rows = 3 }: { rows?: number }) {
         <div key={i} className="h-9 animate-pulse rounded bg-raised/70" />
       ))}
     </div>
+  );
+}
+
+/**
+ * A folded section for reference material.
+ *
+ * Anything that is not a decision belongs behind one of these. The console's job is to surface what
+ * needs judgement; the catalogue and the operator log are things you consult, not things you answer.
+ */
+export function Disclosure({
+  title,
+  count,
+  hint,
+  defaultOpen = false,
+  children,
+}: {
+  title: string;
+  count?: number;
+  hint?: string;
+  defaultOpen?: boolean;
+  children: ReactNode;
+}) {
+  const [open, setOpen] = useState(defaultOpen);
+
+  return (
+    <section className="overflow-hidden rounded-lg border border-hair bg-surface">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+        className="flex w-full items-center gap-2 px-5 py-3 text-left hover:bg-raised/40"
+      >
+        <span
+          className={`text-ink-muted transition-transform ${open ? "rotate-90" : ""}`}
+          aria-hidden
+        >
+          ▸
+        </span>
+        <span className="text-sm font-medium text-ink">{title}</span>
+        {count !== undefined && (
+          <span className="rounded bg-raised px-1.5 py-0.5 text-[11px] text-ink-muted">
+            {count}
+          </span>
+        )}
+        {hint && <span className="ml-1 truncate text-xs text-ink-muted">{hint}</span>}
+      </button>
+      {open && <div className="border-t border-hair">{children}</div>}
+    </section>
   );
 }

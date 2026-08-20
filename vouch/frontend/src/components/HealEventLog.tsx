@@ -1,14 +1,16 @@
 /**
- * README section 7, SIDE: the operator log, in real Scraper Studio vocabulary.
+ * The operator log, in real Scraper Studio vocabulary.
  *
- * Secondary on purpose. The headline is the held decision; this panel is for the operator who wants
- * to know what the heal loop actually did. The vocabulary itself is generated server-side
- * (service.heal_log_entries) so it lives in one reviewable place, and `kind` carries the colour so
- * nothing here parses prose.
+ * Secondary on purpose, and now folded shut by default. README section 7 always called this a
+ * secondary panel, but as a full-height sticky column it carried the same visual weight as the
+ * decision it was supposed to be subordinate to.
+ *
+ * The vocabulary is generated server-side (service.heal_log_entries) so it lives in one reviewable
+ * place, and `kind` carries the colour so nothing here parses prose.
  */
 
 import type { HealEvent, LogKind } from "../types";
-import { Card, EmptyState, SectionHeader } from "./ui/Bits";
+import { Disclosure, EmptyState } from "./ui/Bits";
 
 const KIND_STYLE: Record<LogKind, string> = {
   run: "text-ink-muted",
@@ -28,13 +30,11 @@ const KIND_MARK: Record<LogKind, string> = {
 
 export function HealEventLog({ events }: { events: HealEvent[] }) {
   return (
-    <Card className="lg:sticky lg:top-6">
-      <SectionHeader
-        title="Heal events"
-        count={events.length}
-        hint="Scraper Studio's heal loop, as it happened."
-      />
-
+    <Disclosure
+      title="Heal log"
+      count={events.length}
+      hint="Scraper Studio's heal loop, as it happened"
+    >
       {events.length === 0 ? (
         <EmptyState
           title="No heals yet"
@@ -91,6 +91,6 @@ export function HealEventLog({ events }: { events: HealEvent[] }) {
           ))}
         </ol>
       )}
-    </Card>
+    </Disclosure>
   );
 }

@@ -25,7 +25,6 @@ export function Header({
   collectorId,
   onRunCycle,
   onReplay,
-  onResume,
   onReset,
 }: {
   mockMode: boolean;
@@ -35,7 +34,6 @@ export function Header({
   collectorId: string | null;
   onRunCycle: () => void;
   onReplay: (healKey: string) => void;
-  onResume: () => void;
   onReset: () => void;
 }) {
   const healHints = hints.filter((hint) => hint.stage === "heal" && hint.key !== "healed_good");
@@ -77,14 +75,6 @@ export function Header({
                   {hint.label}
                 </Button>
               ))}
-              <Button
-                variant="secondary"
-                onClick={onResume}
-                busy={busy === "run-cycle"}
-                title="Re-prompt the heal with the guardian's own diagnosis, then re-validate"
-              >
-                Re-prompt &amp; resume
-              </Button>
               <Button variant="ghost" onClick={onReset} busy={busy === "reset"}>
                 Reset
               </Button>
