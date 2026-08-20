@@ -138,14 +138,14 @@ def test_the_sharpened_prompt_names_the_actual_diagnosis(product, baseline):
     assert "price" in second.prompt
 
 
-def test_resharpen_never_raises_on_an_unknown_check_code(product):
+def test_resharpen_never_raises_on_an_unknown_check_code():
     """Dict dispatch with a fallback: an unrecognised code degrades to the brief, never a KeyError."""
     from app.guardian.checks import CheckResult, Severity
     from app.guardian.verdict import decide
 
     verdict = decide([CheckResult(False, Severity.HIGH, "price", "SOME_FUTURE_CHECK",
                                   "Something new went wrong.", {})])
-    prompt = orchestrator._resharpen_prompt(product, verdict)
+    prompt = orchestrator._resharpen_prompt(verdict)
     assert "Something new went wrong." in prompt
     assert verdict.decision == REVIEW
 

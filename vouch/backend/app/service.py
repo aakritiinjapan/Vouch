@@ -38,7 +38,13 @@ from app.models import (
     RepriceProposal,
     _now,
 )
-from app.orchestrator import CycleOutcome, SimulateHint, run_cycle_for_product
+from app.orchestrator import (
+    CycleOutcome,
+    SimulateHint,
+    SourceOutcome,
+    price_against_source,
+    resolve_source,
+)
 from app.scraper import baseline as baseline_capture
 from app.scraper import brightdata
 
@@ -175,34 +181,25 @@ def refresh_baseline(session: Session, baseline: Baseline, records: list[dict]) 
 # the cycle
 # --------------------------------------------------------------------------------------
 
-def run_cycle(session: Session, product: Product, *,
-              simulate_run: Optional[str] = None,
-              simulate_heal: SimulateHint = None,
-              max_heal_attempts: Optional[int] = None) -> CycleRecord:
-    """Run one product's cycle and persist everything it produced.
+def _persist_source(session: Session, source: SourceOutcome, baseline: Baseline,
+                    cycle_id: str) -> tuple[list[int], bool]:
+    """Record the heal attempts on a COLLECTOR, and advance its baseline if a heal was verified.
 
-    Exactly one commit, at the end. If anything raises part-way there is no half-written cycle to
-    explain - the database still holds the previous, coherent state.
+    Written once per collector per cycle, however many products read it. HealEvent.product_id is left
+    null on purpose: a heal fixes the collector, not one SKU, and attributing it to whichever product
+    happened to trigger the cycle would be a fiction. Each product's proposal still links to the
+    specific event that justified it via RepriceProposal.heal_event_id.
+
+    Returns (heal_event_ids, baseline_refreshed).
     """
-    baseline = ensure_baseline(session, product)
-    cycle_id = uuid.uuid4().hex[:8]
-
-    kwargs = {}
-    if max_heal_attempts is not None:
-        kwargs["max_heal_attempts"] = max_heal_attempts
-    outcome = run_cycle_for_product(product, baseline, simulate_run=simulate_run,
-                                    simulate_heal=simulate_heal, **kwargs)
-
-    record = CycleRecord(product_id=product.id, sku=product.sku, cycle_id=cycle_id, outcome=outcome)
-
-    # --- one HealEvent per attempt --------------------------------------------------------
-    for attempt in outcome.heal_attempts:
+    heal_event_ids: list[int] = []
+    for attempt in source.heal_attempts:
         verdict = attempt.verdict
         failure = verdict.primary_failure
         event = HealEvent(
-            collector_id=product.collector_id,
-            product_id=product.id,
-            trigger_reason=outcome.trigger_reason or "",
+            collector_id=source.collector_id,
+            product_id=None,
+            trigger_reason=source.trigger_reason or "",
             prompt=attempt.prompt,
             proposed_confidence=verdict.confidence,
             verdict=HealVerdict(verdict.decision),
@@ -215,12 +212,24 @@ def run_cycle(session: Session, product: Product, *,
         )
         session.add(event)
         session.flush()
-        record.heal_event_ids.append(event.id)
+        heal_event_ids.append(event.id)
 
-    # --- the baseline ratchet -------------------------------------------------------------
-    if outcome.source_confirmed and any(a.committed for a in outcome.heal_attempts):
-        refresh_baseline(session, baseline, outcome.records)
-        record.baseline_refreshed = True
+    # --- the baseline ratchet: only guardian-confirmed data becomes the new yardstick ------
+    refreshed = False
+    if source.confirmed and any(a.committed for a in source.heal_attempts):
+        refresh_baseline(session, baseline, source.records)
+        refreshed = True
+
+    return heal_event_ids, refreshed
+
+
+def _persist_product_cycle(session: Session, product: Product, outcome: CycleOutcome,
+                           cycle_id: str, heal_event_ids: list[int],
+                           baseline_refreshed: bool) -> CycleRecord:
+    """Record ONE product's decision against an already-resolved collector. Does not commit."""
+    record = CycleRecord(product_id=product.id, sku=product.sku, cycle_id=cycle_id, outcome=outcome)
+    record.heal_event_ids = list(heal_event_ids)
+    record.baseline_refreshed = baseline_refreshed
 
     # --- what we observed, confirmed or not ----------------------------------------------
     observed_price = outcome.competitor_price
@@ -266,6 +275,31 @@ def run_cycle(session: Session, product: Product, *,
             session.flush()
             record.proposal_id = proposal.id
 
+    return record
+
+
+def run_cycle(session: Session, product: Product, *,
+              simulate_run: Optional[str] = None,
+              simulate_heal: SimulateHint = None,
+              max_heal_attempts: Optional[int] = None) -> CycleRecord:
+    """Run one product's cycle and persist everything it produced.
+
+    Exactly one commit, at the end. If anything raises part-way there is no half-written cycle to
+    explain - the database still holds the previous, coherent state.
+    """
+    baseline = ensure_baseline(session, product)
+    cycle_id = uuid.uuid4().hex[:8]
+
+    kwargs = {}
+    if max_heal_attempts is not None:
+        kwargs["max_heal_attempts"] = max_heal_attempts
+    source = resolve_source(product.collector_id, product.competitor_url, baseline,
+                            simulate_run=simulate_run, simulate_heal=simulate_heal, **kwargs)
+
+    heal_event_ids, refreshed = _persist_source(session, source, baseline, cycle_id)
+    outcome = price_against_source(product, source)
+    record = _persist_product_cycle(session, product, outcome, cycle_id, heal_event_ids, refreshed)
+
     session.commit()
     return record
 
@@ -274,7 +308,7 @@ def run_all_cycles(session: Session, *, skus: Optional[Iterable[str]] = None,
                    simulate_run: Optional[str] = None,
                    simulate_heal: SimulateHint = None,
                    max_heal_attempts: Optional[int] = None) -> list[CycleRecord]:
-    """Run every product's cycle, one at a time.
+    """Run a cycle for every product, healing each COLLECTOR at most once.
 
     Deliberately serial. Bright Data caps concurrent AI-Flow jobs (create/heal) at 3 per account, and
     a 4th returns 429; fanning out here would spend the demo in exponential backoff.
@@ -290,9 +324,36 @@ def run_all_cycles(session: Session, *, skus: Optional[Iterable[str]] = None,
         if missing:
             raise NotFound(f"unknown sku(s): {', '.join(sorted(missing))}")
 
-    return [run_cycle(session, p, simulate_run=simulate_run, simulate_heal=simulate_heal,
-                      max_heal_attempts=max_heal_attempts)
-            for p in products]
+    # Group by collector. Several SKUs price against the same competitor listing page, so they
+    # share a collector - and a layout change is ONE event on it. Resolving per product would
+    # trigger one real Scraper Studio heal per SKU for a single problem, which burns credits, hits
+    # the 3-job AI-Flow cap, and makes the operator log read as several unrelated incidents.
+    groups: dict[str, list[Product]] = {}
+    for product in products:
+        groups.setdefault(product.collector_id, []).append(product)
+
+    kwargs = {}
+    if max_heal_attempts is not None:
+        kwargs["max_heal_attempts"] = max_heal_attempts
+
+    records: list[CycleRecord] = []
+    for collector_id, members in groups.items():
+        # Any member supplies the collector's URL and baseline - they share both by definition.
+        baseline = ensure_baseline(session, members[0])
+        cycle_id = uuid.uuid4().hex[:8]
+
+        source = resolve_source(collector_id, members[0].competitor_url, baseline,
+                                simulate_run=simulate_run, simulate_heal=simulate_heal, **kwargs)
+        heal_event_ids, refreshed = _persist_source(session, source, baseline, cycle_id)
+
+        for product in members:
+            outcome = price_against_source(product, source)
+            records.append(_persist_product_cycle(session, product, outcome, cycle_id,
+                                                  heal_event_ids, refreshed))
+
+    # One commit for the whole sweep: a half-applied cycle is not a state worth having.
+    session.commit()
+    return records
 
 
 # --------------------------------------------------------------------------------------

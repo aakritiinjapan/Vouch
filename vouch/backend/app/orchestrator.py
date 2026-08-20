@@ -62,6 +62,32 @@ class ProposalDraft:
 
 
 @dataclass
+class SourceOutcome:
+    """The state of ONE COLLECTOR's data after this cycle ran it and maybe healed it.
+
+    A collector serves every product that reads the same competitor page, so this is resolved once
+    per collector and then priced against many products. That is not just an efficiency point: a
+    layout change is one event, and healing it once per SKU would be three real Scraper Studio heals
+    for one problem, against an AI-Flow cap of 3 concurrent jobs.
+    """
+    collector_id: str
+    records: list[dict]                   # the rows we ended up trusting (or the last run)
+    confirmed: bool
+    trigger_reason: Optional[str] = None  # None when no heal was needed
+    verdict: Optional[Verdict] = None     # the FINAL attempt's verdict; None if no heal happened
+    heal_attempts: list[HealAttempt] = field(default_factory=list)
+
+    @property
+    def healed(self) -> bool:
+        return bool(self.heal_attempts)
+
+    @property
+    def last_rejected(self) -> Optional[HealAttempt]:
+        """The attempt whose numbers we refused to act on - what the counterfactual describes."""
+        return next((a for a in reversed(self.heal_attempts) if not a.committed), None)
+
+
+@dataclass
 class CycleOutcome:
     product_sku: str
     competitor_price: Optional[float]
@@ -102,25 +128,23 @@ def _degradation_reason(baseline: Baseline, baseline_profiles: dict[str, FieldPr
 # the cycle
 # --------------------------------------------------------------------------------------
 
-def run_cycle_for_product(product: Product, baseline: Baseline, *,
-                          simulate_run: Optional[str] = None,
-                          simulate_heal: SimulateHint = None,
-                          max_heal_attempts: int = MAX_HEAL_ATTEMPTS) -> CycleOutcome:
-    """
-    `product`       : a Product row (collector_id, competitor_url, my_price, cost, floor_margin)
-    `baseline`      : a Baseline row (field_profiles + record_count) - the last-known-good reference
-    `simulate_run`  : demo hook (mock only) - e.g. 'run_degraded' to trigger a heal on real nulls
-    `simulate_heal` : demo hook (mock only) - a fixture key, or a per-attempt sequence of them
+def resolve_source(collector_id: str, url: str, baseline: Baseline, *,
+                   simulate_run: Optional[str] = None,
+                   simulate_heal: SimulateHint = None,
+                   max_heal_attempts: int = MAX_HEAL_ATTEMPTS) -> SourceOutcome:
+    """Run one collector, and if its output looks degraded, heal it behind the approval gate.
+
+    Called ONCE PER COLLECTOR per cycle, however many products read it. Everything here concerns the
+    data source; nothing here knows about prices, margins or SKUs.
     """
     baseline_profiles = {k: FieldProfile.from_dict(v) for k, v in baseline.field_profiles.items()}
 
-    records = brightdata.run(product.collector_id, product.competitor_url, _simulate=simulate_run)
+    records = brightdata.run(collector_id, url, _simulate=simulate_run)
     trigger_reason = _degradation_reason(baseline, baseline_profiles, records)
 
     attempts: list[HealAttempt] = []
-    source_confirmed = True
+    confirmed = True
     verdict: Optional[Verdict] = None
-    counterfactual: Optional[dict] = None
 
     if simulate_heal or trigger_reason:
         if trigger_reason is None:
@@ -128,12 +152,12 @@ def run_cycle_for_product(product: Product, baseline: Baseline, *,
             # than printing a null-rate the code never measured.
             trigger_reason = "Heal triggered manually (simulated for demo)."
 
-        prompt = _heal_prompt(product)
+        prompt = _heal_prompt()
         attempt = 0
         while attempt < max_heal_attempts:
             attempt += 1
             proposal = brightdata.propose_heal(
-                product.collector_id, prompt, product.competitor_url,
+                collector_id, prompt, url,
                 _simulate=_simulate_for_attempt(simulate_heal, attempt),
             )
             verdict = _judge_if_ambiguous(
@@ -145,15 +169,15 @@ def run_cycle_for_product(product: Product, baseline: Baseline, *,
             committed = verdict.confirmed
 
             if committed:
-                brightdata.approve_heal(product.collector_id)   # at most once per cycle
+                brightdata.approve_heal(collector_id)   # at most once per cycle
                 records = proposal.proposed_records
-                source_confirmed = True
+                confirmed = True
             else:
                 # Reject every failed attempt so the collector never sits at an open approval gate.
                 # Bright Data leaves the scraper unchanged on reject, which is what makes a retry
                 # with a clearer prompt safe.
-                brightdata.reject_heal(product.collector_id)
-                source_confirmed = False
+                brightdata.reject_heal(collector_id)
+                confirmed = False
 
             attempts.append(HealAttempt(attempt=attempt, prompt=prompt, verdict=verdict,
                                         proposed_records=proposal.proposed_records,
@@ -163,11 +187,27 @@ def run_cycle_for_product(product: Product, baseline: Baseline, *,
                 break
 
             # The guardian's own machine-readable diagnosis writes the next heal prompt.
-            prompt = _resharpen_prompt(product, verdict)
+            prompt = _resharpen_prompt(verdict)
+
+    return SourceOutcome(collector_id=collector_id, records=records, confirmed=confirmed,
+                         trigger_reason=trigger_reason, verdict=verdict, heal_attempts=attempts)
+
+
+def price_against_source(product: Product, source: SourceOutcome) -> CycleOutcome:
+    """Turn one collector's resolved data into one product's reprice decision.
+
+    Pure arithmetic and matching - no network, no heal. Every product sharing a collector is priced
+    against the same SourceOutcome, so they cannot disagree about whether the source was verified.
+    """
+    verdict = source.verdict
+    source_confirmed = source.confirmed
+    attempts = source.heal_attempts
+    records = source.records
+    counterfactual: Optional[dict] = None
 
     # The counterfactual describes the LAST REJECTED attempt: the number we refused to act on.
     if not source_confirmed:
-        rejected = next((a for a in reversed(attempts) if not a.committed), None)
+        rejected = source.last_rejected
         if rejected is not None:
             counterfactual = _counterfactual(
                 product,
@@ -175,6 +215,7 @@ def run_cycle_for_product(product: Product, baseline: Baseline, *,
                 source=f"rejected_heal_attempt_{rejected.attempt}",
             )
 
+    trigger_reason = source.trigger_reason
     competitor_price = _extract_competitor_price(product, records) if source_confirmed else None
 
     if not source_confirmed:
@@ -208,6 +249,22 @@ def run_cycle_for_product(product: Product, baseline: Baseline, *,
     )
 
 
+def run_cycle_for_product(product: Product, baseline: Baseline, *,
+                          simulate_run: Optional[str] = None,
+                          simulate_heal: SimulateHint = None,
+                          max_heal_attempts: int = MAX_HEAL_ATTEMPTS) -> CycleOutcome:
+    """One product's full cycle: resolve its collector, then price against the result.
+
+    Kept for the single-product path and for tests. When several products share a collector, call
+    resolve_source() once and price_against_source() per product instead - otherwise each product
+    triggers its own heal for the same layout change.
+    """
+    source = resolve_source(product.collector_id, product.competitor_url, baseline,
+                            simulate_run=simulate_run, simulate_heal=simulate_heal,
+                            max_heal_attempts=max_heal_attempts)
+    return price_against_source(product, source)
+
+
 def _judge_if_ambiguous(verdict: Verdict, records: list[dict]) -> Verdict:
     """Escalate to the Tier 3 semantic judge only when the cheap tiers could not decide.
 
@@ -224,12 +281,17 @@ def _judge_if_ambiguous(verdict: Verdict, records: list[dict]) -> Verdict:
 # prompts
 # --------------------------------------------------------------------------------------
 
-def _heal_prompt(product: Product) -> str:
-    return (f"The competitor page changed. Extract the current SALE price of the product "
-            f"(not the crossed-out original, not shipping) matching SKU {product.sku}.")
+def _heal_prompt() -> str:
+    """The collector reads a whole listing page, so the prompt describes the page - not one SKU.
+
+    It used to name the SKU of whichever product happened to trigger the cycle, which was misleading:
+    the same collector serves every product on the page, and the fix has to be right for all of them.
+    """
+    return ("The competitor listing page changed. For each product tile, extract the current SALE "
+            "price the customer pays - not the crossed-out original price, and not the shipping cost.")
 
 
-def _resharpen_prompt(product: Product, verdict: Verdict) -> str:
+def _resharpen_prompt(verdict: Verdict) -> str:
     """Turn the guardian's diagnosis into a sharper instruction for the next heal.
 
     This is the whole point of validating before committing: we do not just refuse the bad fix, we
@@ -238,7 +300,7 @@ def _resharpen_prompt(product: Product, verdict: Verdict) -> str:
     """
     failure = verdict.primary_failure
     if failure is None:
-        return _heal_prompt(product)
+        return _heal_prompt()
 
     ev = failure.evidence or {}
     field_name = ev.get("field", failure.field_name)
@@ -296,7 +358,7 @@ def _resharpen_prompt(product: Product, verdict: Verdict) -> str:
     else:
         detail = verdict.brief
 
-    return f"{base}{detail} {_heal_prompt(product)}"
+    return f"{base}{detail} {_heal_prompt()}"
 
 
 def _simulate_for_attempt(hint: SimulateHint, attempt: int) -> Optional[str]:

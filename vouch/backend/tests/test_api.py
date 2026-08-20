@@ -152,9 +152,30 @@ def test_a_degraded_run_reports_a_measured_trigger_reason(client):
     assert "empty on 75% of rows" in summary["cycles"][0]["trigger_reason"]
 
 
+def test_one_layout_change_produces_one_heal_not_one_per_product(client, held_card):
+    """Every seeded SKU reads the same competitor page, so they share a collector.
+
+    A layout change is therefore ONE event on ONE collector. Healing per product would fire a real
+    Scraper Studio heal for every SKU that happens to read the page - burning credits, hitting the
+    3-job AI-Flow cap, and making the operator log read as several unrelated incidents.
+    """
+    events = client.get("/heal-events").json()
+
+    assert len(events) == 2, "one collector x two attempts, NOT one heal per SKU"
+    assert {e["attempt"] for e in events} == {1, 2}
+    assert len({e["collector_id"] for e in events}) == 1
+    assert len({e["cycle_id"] for e in events}) == 1, "one cycle, not one per product"
+    assert all(e["product"] is None for e in events), \
+        "a heal fixes the collector, not one SKU - attributing it to one would be a fiction"
+
+    # Every held product still points at the specific attempt that justified holding it.
+    held = client.get("/proposals", params={"status": "held"}).json()
+    assert len(held) >= 2, "several SKUs are affected by the one bad heal"
+    assert {p["guardian"]["heal_event_id"] for p in held} <= {e["id"] for e in events}
+
+
 def test_the_heal_log_speaks_scraper_studio(client, held_card):
     events = client.get("/heal-events").json()
-    assert len(events) == 4, "two SKUs x two attempts"
 
     text = " | ".join(e["text"] for ev in events for e in ev["entries"])
     assert "awaiting approval" in text
