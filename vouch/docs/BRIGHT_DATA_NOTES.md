@@ -133,6 +133,18 @@ A 4th concurrent `create`/`heal` returns `429 Cannot run more than N jobs in par
 with exponential backoff (`--max-retries`, default 4). **`service.run_all_cycles` is deliberately
 serial** — fanning out across SKUs would spend the demo in backoff.
 
+### 10. After `scraper approve`, the collector is temporarily disabled
+
+Immediately after a heal is approved, both `scraper run` (CLI) and `POST /dca/trigger` (REST) return:
+
+```
+HTTP 403 {"error":"Collector disabled"}
+```
+
+This is a Bright Data platform state, not a Vouch error. The collector must be **re-enabled from the
+control panel** at `https://brightdata.com/cp/scrapers/<id>` before it can run again. There is no
+programmatic enable/disable surface in the CLI — check the dashboard after every approved heal.
+
 ---
 
 ## Cost

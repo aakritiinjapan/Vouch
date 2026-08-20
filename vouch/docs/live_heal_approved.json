@@ -1,0 +1,24 @@
+{
+  "_comment": "A real Scraper Studio heal that the guardian PASSED (100/100) and Vouch therefore committed via approve_heal(). The approval was executed live against collector c_mszq0z1x27brru3wab. The subsequent re-run returned HTTP 403 'Collector disabled' — a Bright Data post-heal state (see BRIGHT_DATA_NOTES.md trap 10) that requires re-enabling the collector from the control panel before it can run again. The guardian's verdict controlled the gate: nothing was committed that it could not vouch for.",
+  "collector_id": "c_mszq0z1x27brru3wab",
+  "prompt": "The price field is wrong. Extract each card's own current selling price - the prominent price the customer pays - not the shipping cost and not any crossed-out reference price.",
+  "gate_status": "awaiting_approval -> approved",
+  "guardian": {
+    "decision": "pass",
+    "confidence": 100,
+    "brief": "Heal verified - data still means what it should. Safe to commit."
+  },
+  "preview_at_gate": [
+    {
+      "product_page_url": "https://www.newegg.com/sapphire-tech-pulse-11350-...16gb-graphics-card-double-fans/p/N82E16814202457",
+      "name": "SAPPHIRE PULSE Radeon RX 9060 XT 16GB GDDR6 PCI Express 5.0 x16 ATX Graphics Card 11350-03-20G",
+      "price": 519.99,
+      "original_price": null,
+      "shipping": 0,
+      "rating": 4,
+      "in_stock": true
+    }
+  ],
+  "rows_after_approval": null,
+  "_rows_after_note": "brightdata scraper run returned HTTP 403 'Collector disabled' immediately after approval. This is a Bright Data post-heal platform state, not a Vouch error. Re-enable the collector at https://brightdata.com/cp/scrapers/c_mszq0z1x27brru3wab before the next run."
+}
