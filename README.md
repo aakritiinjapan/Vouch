@@ -23,7 +23,7 @@ quiet — see [`screenshot-confirmed.png`](vouch/docs/screenshot-confirmed.png).
 ## Quickstart
 
 ```bash
-git clone https://github.com/DeepakReddyVelagala/Vouch.git
+git clone https://github.com/aakritiinjapan/Vouch.git
 cd Vouch
 ./demo.sh
 ```
