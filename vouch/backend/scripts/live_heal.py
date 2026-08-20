@@ -81,8 +81,12 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--collector", default=None, help="c_* id (defaults to seed.COLLECTOR_ID)")
     parser.add_argument("--prompt-style", choices=sorted(PROMPTS), default="vague")
     parser.add_argument("--prompt", default=None, help="override the prompt entirely")
+    parser.add_argument("--approve-if-passed", action="store_true",
+                        help="COMMIT the heal if the guardian passes it. The approval is gated on the "
+                             "verdict, which is the whole product: nothing gets committed that the "
+                             "guardian could not vouch for. Same collector id either way.")
     parser.add_argument("--keep", action="store_true",
-                        help="do NOT reject at the end (leaves the gate open - almost never what you want)")
+                        help="do NOT answer the gate at all (leaves it open - almost never what you want)")
     args = parser.parse_args(argv)
 
     if settings.mock_mode:
@@ -127,7 +131,8 @@ def main(argv: list[str] | None = None) -> None:
 
     print()
     print("the guardian judges it BEFORE anything is committed ...")
-    verdict = decide(run_all_checks(profiles, rows, baseline_count=baseline_count))
+    verdict = decide(run_all_checks(profiles, rows, baseline_count=baseline_count,
+                                    is_sample=proposal.is_sample))
     print(f"  decision   : {verdict.decision.upper()}   confidence {verdict.confidence}/100")
     print(f"  brief      : {verdict.brief}")
     for failure in verdict.failures:
@@ -155,9 +160,40 @@ def main(argv: list[str] | None = None) -> None:
     print(f"\n  wrote docs/{out.name}")
 
     if args.keep:
-        print("\n! --keep: the gate is still OPEN. Reject or approve it before running again:")
-        print(f"    npx -y @brightdata/cli scraper approve {collector_id} --reject")
+        print("\n! --keep: the gate is still OPEN. Answer it before running again:")
+        print(f"    npx -y @brightdata/cli scraper approve {collector_id} [--reject]")
         return
+
+    # The product, in three lines: the guardian's verdict decides what happens at the gate. Nothing
+    # is committed that it could not vouch for, and nothing it verified is thrown away.
+    if args.approve_if_passed and verdict.confirmed:
+        print("\nguardian PASSED it, so committing the fix ...")
+        brightdata.approve_heal(collector_id)
+        print(f"  approved - collector {collector_id} is repaired IN PLACE.")
+        print("  Same collector id, same downstream wiring, nothing else touched.")
+
+        print("\nre-running that same collector id to prove it still works ...")
+        rows_after = brightdata.run(collector_id, LIVE_URL)
+        print(f"  {len(rows_after)} rows from the SAME collector id after the repair")
+
+        after = DOCS / "live_heal_approved.json"
+        after.write_text(json.dumps({
+            "_comment": ("A real Scraper Studio heal that the guardian PASSED and we therefore "
+                         "committed, followed by a re-run of the same collector id showing it is "
+                         "repaired in place. Produced by scripts/live_heal.py --approve-if-passed."),
+            "collector_id": collector_id,
+            "prompt": prompt,
+            "gate_status": "awaiting_approval -> approved",
+            "guardian": {"decision": verdict.decision, "confidence": verdict.confidence,
+                         "brief": verdict.brief},
+            "preview_at_gate": rows,
+            "rows_after_approval": rows_after,
+        }, indent=2, default=str) + "\n", encoding="utf-8")
+        print(f"  wrote docs/{after.name}")
+        return
+
+    if args.approve_if_passed:
+        print(f"\nguardian did NOT pass it ({verdict.decision}), so it will not be committed.")
 
     print("\nrejecting, so nothing is committed and the collector is unchanged ...")
     brightdata.reject_heal(collector_id)

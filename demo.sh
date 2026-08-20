@@ -47,9 +47,19 @@ if [ ! -d "$VENV" ]; then
   }
 fi
 if [ -n "$VENV" ]; then
-  # shellcheck disable=SC1091
-  source "$VENV/bin/activate"
-  PYTHON="python"
+  # Windows venvs put the launcher in Scripts/, POSIX ones in bin/. A judge on Git Bash would
+  # otherwise fail on the very first command in the README.
+  if [ -f "$VENV/bin/activate" ]; then
+    # shellcheck disable=SC1091
+    source "$VENV/bin/activate"
+  elif [ -f "$VENV/Scripts/activate" ]; then
+    # shellcheck disable=SC1091
+    source "$VENV/Scripts/activate"
+  else
+    info "venv has no activate script, using the system interpreter"
+    VENV=""
+  fi
+  [ -n "$VENV" ] && PYTHON="python"
 fi
 "$PYTHON" -m pip install -q --disable-pip-version-check -r "$BACKEND/requirements.txt"
 info "ok"
@@ -95,6 +105,11 @@ bold "4/4  starting"
 for port in "$API_PORT" "$UI_PORT"; do
   if command -v lsof >/dev/null; then
     lsof -ti:"$port" -sTCP:LISTEN 2>/dev/null | xargs -r kill 2>/dev/null || true
+  elif command -v netstat >/dev/null && command -v taskkill >/dev/null; then
+    # Windows: netstat -> PID -> taskkill. Best effort; a stale listener only costs a retry.
+    netstat -ano 2>/dev/null | grep -E "LISTENING" | grep -E ":$port"       | awk '{print $NF}' | sort -u | while read -r pid; do
+        taskkill //F //PID "$pid" >/dev/null 2>&1 || true
+      done
   fi
 done
 

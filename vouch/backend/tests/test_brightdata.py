@@ -267,3 +267,84 @@ def test_usd_in_any_casing_is_accepted():
 def test_rows_without_any_currency_are_accepted():
     """Most collectors never emit a currency field at all; absence is not a failure."""
     assert brightdata._rows([{"name": "x", "price": 1.0}])[0]["price"] == 1.0
+
+
+# --------------------------------------------------------------------------------------
+# the collector id as a production endpoint (REST)
+# --------------------------------------------------------------------------------------
+
+@pytest.fixture
+def rest(monkeypatch):
+    """Force the live path and capture the REST call instead of making it."""
+    monkeypatch.setattr(brightdata.settings, "mock_mode", False)
+    monkeypatch.setattr(brightdata.settings, "brightdata_api_key", "test-key")
+    calls: list[dict] = []
+
+    def fake_api(method, path, *, body=None, timeout=120):
+        calls.append({"method": method, "path": path, "body": body})
+        return fake_api.payload
+
+    fake_api.payload = {}
+    monkeypatch.setattr(brightdata, "_api", fake_api)
+    return calls, fake_api
+
+
+def test_trigger_posts_the_collector_id_and_returns_a_job_id(rest):
+    calls, api = rest
+    api.payload = {"collection_id": "j_abc123"}
+
+    job_id = brightdata.trigger("c_abc", ["https://example.com/a", "https://example.com/b"])
+
+    assert job_id == "j_abc123"
+    assert calls[0]["method"] == "POST"
+    assert "collector=c_abc" in calls[0]["path"]
+    assert calls[0]["path"].startswith("/dca/trigger")
+    assert calls[0]["body"] == [{"url": "https://example.com/a"}, {"url": "https://example.com/b"}]
+
+
+@pytest.mark.parametrize("key", ["collection_id", "response_id", "job_id"])
+def test_trigger_accepts_any_documented_job_id_key(rest, key):
+    """The trigger response key differs between the sync and async endpoints."""
+    _, api = rest
+    api.payload = {key: "j_x"}
+    assert brightdata.trigger("c_abc", ["https://example.com"]) == "j_x"
+
+
+def test_trigger_without_a_job_id_is_an_error(rest):
+    _, api = rest
+    api.payload = {"status": "queued"}
+    with pytest.raises(RuntimeError, match="no job id"):
+        brightdata.trigger("c_abc", ["https://example.com"])
+
+
+def test_fetch_dataset_normalises_rows_like_run_does(rest):
+    """The REST path must produce the same flat shape as the CLI path, or the guardian sees two
+    different schemas depending on how the collector happened to be fired."""
+    _, api = rest
+    api.payload = {"data": STUDIO_SHAPE}
+
+    rows = brightdata.fetch_dataset("j_abc")
+
+    assert len(rows) == 1
+    assert rows[0]["price"] == 299.99, "money object unwrapped, exactly as in run()"
+    assert "graphics_cards" not in rows[0]
+
+
+def test_mock_mode_never_calls_the_rest_api(monkeypatch):
+    def explode(*_args, **_kwargs):
+        raise AssertionError("MOCK_MODE must not reach the network")
+
+    monkeypatch.setattr(brightdata, "_api", explode)
+    monkeypatch.setattr(brightdata.settings, "mock_mode", True)
+
+    assert brightdata.trigger("c_x", ["https://example.com"]).startswith("j_")
+    assert brightdata.fetch_dataset("j_x")
+
+
+def test_a_missing_credential_says_what_to_do(monkeypatch):
+    monkeypatch.setattr(brightdata.settings, "mock_mode", False)
+    monkeypatch.setattr(brightdata.settings, "brightdata_api_key", "")
+    monkeypatch.setattr(brightdata.settings, "brightdata_api_token", "")
+
+    with pytest.raises(RuntimeError, match="BRIGHTDATA_API_KEY"):
+        brightdata._api("GET", "/dca/dataset?id=j_x")

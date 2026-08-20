@@ -361,3 +361,80 @@ def _cli(*args: str) -> str:
     if proc.returncode != 0:
         raise RuntimeError(f"brightdata {' '.join(args)} failed: {proc.stderr.strip()}")
     return proc.stdout
+
+
+# --------------------------------------------------------------------------------------
+# The collector id as a production endpoint
+# --------------------------------------------------------------------------------------
+#
+# A c_* collector is a live trigger, not just something the CLI drives: the same id can be fired from
+# any language or scheduler with no deployment step. scripts/watch.py is the scheduler that uses it.
+#
+# The CLI path above is the one this project exercises for the heal loop, because the CLI is the only
+# surface that exposes heal/approve/reject at all. These two functions are the REST equivalent of
+# `scraper run`, implemented against Bright Data's documented AI-Flow spec, for callers that would
+# rather not shell out - a cron job, a Lambda, another service.
+
+API_BASE = "https://api.brightdata.com"
+
+
+def _api(method: str, path: str, *, body: Optional[dict] = None,
+         timeout: int = 120) -> object:
+    """One authenticated call to the Scraper Studio REST API.
+
+    Uses urllib rather than an HTTP client library on purpose: this is two requests, and the project
+    is otherwise free of runtime HTTP dependencies. Not worth a package.
+    """
+    import urllib.error
+    import urllib.request
+
+    token = settings.brightdata_api_key or settings.brightdata_api_token
+    if not token:
+        raise RuntimeError(
+            "no Bright Data credential. Set BRIGHTDATA_API_KEY in backend/.env, or run "
+            "`npx -y @brightdata/cli login` and use the CLI path instead."
+        )
+
+    request = urllib.request.Request(
+        f"{API_BASE}{path}",
+        method=method,
+        data=json.dumps(body).encode("utf-8") if body is not None else None,
+        headers={
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json",
+        },
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            payload = response.read().decode("utf-8")
+    except urllib.error.HTTPError as exc:              # surface the body, not just the status
+        detail = exc.read().decode("utf-8", "replace")[:400]
+        raise RuntimeError(f"{method} {path} failed: {exc.code} {detail}") from exc
+
+    return json.loads(payload) if payload.strip() else {}
+
+
+def trigger(collector_id: str, urls: list[str]) -> str:
+    """Fire a collector over REST and return the job id (j_*).
+
+    This is the "no deployment step" property in practice: a scheduler holding nothing but a c_* id
+    and a token can run the scraper.
+    """
+    if settings.mock_mode:
+        return "j_mock_job"
+
+    payload = _api("POST", f"/dca/trigger?collector={collector_id}&queue_next=1",
+                   body=[{"url": url} for url in urls])
+    if isinstance(payload, dict):
+        job_id = payload.get("collection_id") or payload.get("response_id") or payload.get("job_id")
+        if job_id:
+            return str(job_id)
+    raise RuntimeError(f"no job id in trigger response: {payload}")
+
+
+def fetch_dataset(job_id: str) -> list[dict]:
+    """Collect the rows a triggered job produced, normalised the same way `run` normalises them."""
+    if settings.mock_mode:
+        return _fixture("baseline")
+
+    return _rows(_api("GET", f"/dca/dataset?id={job_id}"))

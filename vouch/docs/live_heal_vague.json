@@ -1,10 +1,27 @@
 {
-  "_comment": "A real Scraper Studio heal, captured at the approval gate before any commit, with the guardian's verdict on it. Produced by scripts/live_heal.py.",
+  "_comment": "A real Scraper Studio heal, captured at the approval gate before any commit. Contains the verdict as originally recorded AND the verdict the corrected battery gives the same rows - the difference is a bug this run exposed. Produced by scripts/live_heal.py.",
   "collector_id": "c_mszq0z1x27brru3wab",
   "prompt": "the price field looks wrong, re-capture the price near the delivery info",
   "gate_status": "awaiting_approval",
   "diff_summary": "proposed template has 2 step(s) \u00e2\u20ac\u201d review at view_url",
   "guardian": {
+    "decision": "pass",
+    "confidence": 100,
+    "brief": "Heal verified - data still means what it should. Safe to commit.",
+    "failures": [],
+    "_note": "The same stored preview rows re-judged by the corrected battery (is_sample=True). This heal had in fact extracted a valid price, so PASS is the right answer. Recomputed from the rows in this file, not from a second live heal."
+  },
+  "preview_result": [
+    {
+      "product_page_url": "https://www.newegg.com/sapphire-tech-pulse-11350-...16gb-graphics-card-double-fans/p/N82E16814202457",
+      "name": "SAPPHIRE PULSE Radeon RX 9060 XT 16GB GDDR6 PCI Express 5.0 x16 ATX Graphics Card 11350-03-20G",
+      "price": 519.99,
+      "shipping": 0,
+      "rating": 4,
+      "in_stock": true
+    }
+  ],
+  "guardian_at_capture": {
     "decision": "review",
     "confidence": 70,
     "brief": "Couldn't fully confirm this source. Row count changed from 96 to 1.",
@@ -39,16 +56,7 @@
           "proposed_cardinality": 1
         }
       }
-    ]
-  },
-  "preview_result": [
-    {
-      "product_page_url": "https://www.newegg.com/sapphire-tech-pulse-11350-...16gb-graphics-card-double-fans/p/N82E16814202457",
-      "name": "SAPPHIRE PULSE Radeon RX 9060 XT 16GB GDDR6 PCI Express 5.0 x16 ATX Graphics Card 11350-03-20G",
-      "price": 519.99,
-      "shipping": 0,
-      "rating": 4,
-      "in_stock": true
-    }
-  ]
+    ],
+    "_note": "The verdict this run actually produced, kept as recorded. It was wrong, and finding out why is the most useful thing this run taught us: preview_result is a SAMPLE (one row against a 96-row baseline), so the volume-dependent checks measured the preview size rather than the heal. See docs/BRIGHT_DATA_NOTES.md section 2."
+  }
 }
