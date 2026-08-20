@@ -41,9 +41,19 @@ export function HealEventLog({ events }: { events: HealEvent[] }) {
           body="When a collector's output degrades, the heal and the guardian's verdict on it appear here."
         />
       ) : (
-        <ol className="max-h-[calc(100vh-14rem)] divide-y divide-hair overflow-y-auto">
+        /* The list scrolls inside the panel rather than growing it. Without this the log runs past
+           the fold and clips mid-entry, which on a projector looks like a rendering bug rather than
+           a long log. The mask fades the last few pixels so "there is more" is visible without a
+           scrollbar having to be. */
+        <ol
+          className="scroll-slim max-h-[min(64vh,40rem)] divide-y divide-hair overflow-y-auto"
+          style={{
+            maskImage: "linear-gradient(to bottom, black calc(100% - 24px), transparent 100%)",
+            WebkitMaskImage: "linear-gradient(to bottom, black calc(100% - 24px), transparent 100%)",
+          }}
+        >
           {events.map((event) => (
-            <li key={event.id} className="px-5 py-3">
+            <li key={event.id} className="px-5 py-2.5">
               <div className="flex items-baseline justify-between gap-2">
                 <p className="truncate text-xs font-medium text-ink-secondary">
                   {event.product?.sku ?? event.collector_id}

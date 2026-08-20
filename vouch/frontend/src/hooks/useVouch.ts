@@ -9,7 +9,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { ApiError, api } from "../api";
-import type { HealEvent, Product, Proposal } from "../types";
+import type { DemoHints, HealEvent, Product, Proposal } from "../types";
 
 const POLL_MS = 5000;
 
@@ -19,6 +19,8 @@ interface VouchState {
   held: Proposal[];
   healEvents: HealEvent[];
   mockMode: boolean;
+  /** Which replay scenarios the active dataset can honour; empty until /demo/hints answers. */
+  hints: DemoHints | null;
 }
 
 const EMPTY: VouchState = {
@@ -27,6 +29,7 @@ const EMPTY: VouchState = {
   held: [],
   healEvents: [],
   mockMode: true,
+  hints: null,
 };
 
 export function useVouch() {
@@ -52,7 +55,16 @@ export function useVouch() {
         ...prev,
         products,
         pending: queue.filter((p) => p.status === "pending"),
-        held: queue.filter((p) => p.status === "held"),
+        // Worst exposure first. Newest-first is the wrong order for a queue whose whole purpose is
+        // triage: the operator should meet the most expensive hold before the cheapest one, and on
+        // a projector the biggest number should be the one on screen.
+        held: queue
+          .filter((p) => p.status === "held")
+          .sort(
+            (a, b) =>
+              Math.abs(b.counterfactual?.profit_delta_vs_now ?? 0) -
+              Math.abs(a.counterfactual?.profit_delta_vs_now ?? 0),
+          ),
         healEvents,
       }));
       setError(null);
@@ -66,6 +78,22 @@ export function useVouch() {
   useEffect(() => {
     void refresh();
   }, [refresh]);
+
+  // Capabilities are fetched once: which dataset is loaded and what it can replay does not change
+  // while the app is running, and mock_mode is the authority for whether the demo controls exist
+  // at all. Failing quietly is correct - the console still works without its replay buttons.
+  useEffect(() => {
+    let alive = true;
+    api
+      .demoHints()
+      .then((hints) => {
+        if (alive) setState((prev) => ({ ...prev, hints, mockMode: hints.mock_mode }));
+      })
+      .catch(() => undefined);
+    return () => {
+      alive = false;
+    };
+  }, []);
 
   useEffect(() => {
     const id = window.setInterval(() => {

@@ -78,7 +78,7 @@ def _load_baseline(session, collector_id: str) -> Baseline:
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--collector", default=None, help="c_* id (defaults to seed.LIVE_COLLECTOR_ID)")
+    parser.add_argument("--collector", default=None, help="c_* id (defaults to seed.COLLECTOR_ID)")
     parser.add_argument("--prompt-style", choices=sorted(PROMPTS), default="vague")
     parser.add_argument("--prompt", default=None, help="override the prompt entirely")
     parser.add_argument("--keep", action="store_true",
@@ -88,9 +88,9 @@ def main(argv: list[str] | None = None) -> None:
     if settings.mock_mode:
         sys.exit("MOCK_MODE is true - this would heal nothing real. Re-run with MOCK_MODE=false.")
 
-    from scripts.seed import LIVE_COLLECTOR_ID, LIVE_URL
+    from scripts.seed import COLLECTOR_ID, LIVE_URL
 
-    collector_id = args.collector or LIVE_COLLECTOR_ID
+    collector_id = args.collector or COLLECTOR_ID
     prompt = args.prompt or PROMPTS[args.prompt_style]
 
     init_db()

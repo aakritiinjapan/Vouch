@@ -352,3 +352,29 @@ class HistoryOut(BaseModel):
     points: list[HistoryPoint]
     counterfactual: Optional[dict]
     last_confirmed_label: str
+
+
+# --------------------------------------------------------------------------------------
+# demo capabilities
+# --------------------------------------------------------------------------------------
+
+class DemoHintOut(BaseModel):
+    """One scenario the active dataset can replay, as a control the dashboard can render."""
+    key: str                  # the fixture key, sent back as simulate_run / simulate_heal
+    label: str                # what the button says
+    detail: str               # the tooltip: what this scenario is and which check catches it
+    stage: str                # "run" (feeds simulate_run) | "heal" (feeds simulate_heal)
+
+
+class DemoHintsOut(BaseModel):
+    """What the dashboard's demo controls are allowed to offer right now.
+
+    The available scenarios depend on which dataset MOCK_MODE is replaying: the dataset derived from
+    the live collector carries no `original_price`, because the collector never captured one, so the
+    value-ordering scenario genuinely cannot be replayed against it. Advertising a control the data
+    cannot honour would be a small lie in exactly the place this product claims not to tell one.
+    """
+    mock_mode: bool
+    dataset: str
+    dataset_note: str
+    hints: list[DemoHintOut]

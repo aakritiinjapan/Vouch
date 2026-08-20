@@ -1,6 +1,8 @@
 /**
- * Three stat tiles. Sentence-case labels, semibold values, and a qualifier line that names what the
- * number is measured against - a bare number with no reference point is decoration.
+ * Three readings across the top.
+ *
+ * Sentence-case labels, the figure in mono, and a qualifier that names what the number is measured
+ * against — a bare number with no reference point is decoration, not a reading.
  */
 
 import { money, pct } from "../format";
@@ -25,9 +27,9 @@ function Tile({
 
   return (
     <div className="rounded-lg bg-surface px-4 py-3 shadow-card">
-      <p className="text-xs text-ink-muted">{label}</p>
-      <p className={`mt-1 text-2xl font-semibold leading-none ${valueTone}`}>{value}</p>
-      <p className="mt-1 text-[11px] text-ink-muted">{qualifier}</p>
+      <p className="eyebrow">{label}</p>
+      <p className={`num mt-1.5 text-2xl font-bold leading-none ${valueTone}`}>{value}</p>
+      <p className="mt-1.5 text-[11px] text-ink-muted text-pretty">{qualifier}</p>
     </div>
   );
 }

@@ -28,12 +28,12 @@ export function SectionHeader({
   action?: ReactNode;
 }) {
   return (
-    <header className="flex flex-wrap items-center justify-between gap-3 border-b border-hair px-5 py-4">
+    <header className="flex flex-wrap items-center justify-between gap-3 border-b border-hair px-5 py-3.5">
       <div>
-        <h2 className="flex items-center gap-2 text-sm font-semibold text-ink">
+        <h2 className="flex items-center gap-2 text-[13px] font-semibold tracking-tight text-ink">
           {title}
           {count !== undefined && (
-            <span className="rounded-full bg-raised px-2 py-0.5 text-xs font-normal text-ink-secondary">
+            <span className="num rounded bg-raised px-1.5 py-0.5 text-[11px] font-normal text-ink-secondary">
               {count}
             </span>
           )}
@@ -48,7 +48,7 @@ export function SectionHeader({
 /** The machine tag, e.g. COLUMN_SWAP. Monospace on purpose: it reads as evidence, not decoration. */
 export function CheckBadge({ code }: { code: string }) {
   return (
-    <span className="rounded border border-status-critical/40 bg-status-critical/10 px-1.5 py-0.5 font-mono text-[11px] tracking-wide text-status-critical">
+    <span className="rounded border border-status-critical/40 bg-status-critical/10 px-1.5 py-0.5 font-mono text-[11px] font-medium tracking-wide text-status-critical">
       {code}
     </span>
   );
@@ -90,8 +90,8 @@ export function Button({
   title?: string;
 }) {
   const variants = {
-    primary: "bg-series text-white hover:bg-series/85",
-    secondary: "bg-raised text-ink hover:bg-raised/70 border border-hair",
+    primary: "bg-series text-plane font-semibold hover:bg-series/85",
+    secondary: "bg-raised text-ink hover:bg-raised/70 border border-hair hover:border-axis",
     ghost: "text-ink-secondary hover:text-ink hover:bg-raised/60",
     danger:
       "bg-transparent text-status-critical border border-status-critical/40 hover:bg-status-critical/10",
@@ -113,37 +113,63 @@ export function Button({
 }
 
 /**
- * The confidence meter.
+ * The confidence gauge.
  *
- * Colour carries severity in the fill, but it never carries the meaning alone - the icon and the
- * words "failed / unconfirmed / verified" say it too, so it survives a colourblind viewer and a
- * badly-calibrated projector. The unfilled track is the same hue at low opacity so the state reads
- * across the whole bar rather than only the filled part.
+ * Deliberately not a progress bar. A thin filled track reads as "loading", which is the opposite of
+ * what this number is: a completed measurement the operator is being asked to act on. So it is drawn
+ * as a discrete scale - twenty ticks, filled to the score - with the figure set large in mono beside
+ * it. That is what a gauge on an instrument looks like, and it makes the reading the thing you see
+ * first rather than the coloured bar.
+ *
+ * Colour carries severity, but never alone: the icon and the words "failed / unconfirmed /
+ * verified" say it too, so it survives a colourblind viewer and a badly-calibrated projector.
  */
-export function ConfidenceMeter({ confidence }: { confidence: number }) {
+export function ConfidenceMeter({
+  confidence,
+  size = "default",
+}: {
+  confidence: number;
+  size?: "default" | "large";
+}) {
   const severity = confidenceSeverity(confidence);
   const label = { good: "verified", warning: "unconfirmed", critical: "failed" }[severity];
   const icon = { good: "✓", warning: "!", critical: "✕" }[severity];
 
+  const TICKS = 20;
+  const lit = Math.round((Math.max(0, Math.min(100, confidence)) / 100) * TICKS);
+
   return (
-    <div className="flex items-center gap-3">
+    <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
       <div
-        className={`h-1.5 w-40 overflow-hidden rounded-full ${severityBg[severity]}/15`}
+        className="flex items-end gap-[3px]"
         role="meter"
         aria-valuenow={confidence}
         aria-valuemin={0}
         aria-valuemax={100}
         aria-label="Guardian confidence"
       >
-        <div
-          className={`h-full rounded-full ${severityBg[severity]}`}
-          style={{ width: `${Math.max(confidence, 2)}%` }}
-        />
+        {Array.from({ length: TICKS }).map((_, i) => (
+          <span
+            key={i}
+            className={`w-[3px] rounded-[1px] transition-colors ${
+              i < lit ? severityBg[severity] : "bg-axis/45"
+            } ${size === "large" ? "h-4" : "h-3"} ${i % 5 === 0 ? "opacity-100" : "opacity-80"}`}
+          />
+        ))}
       </div>
-      <span className={`text-xs font-medium ${severityText[severity]}`}>
+
+      <span
+        className={`num font-bold leading-none ${severityText[severity]} ${
+          size === "large" ? "text-xl" : "text-base"
+        }`}
+      >
+        {confidence}
+        <span className="text-ink-muted font-normal text-xs"> / 100</span>
+      </span>
+
+      <span className={`text-xs font-semibold ${severityText[severity]}`}>
         {icon} {label}
       </span>
-      <span className="num-tabular text-xs text-ink-secondary">{confidence} / 100</span>
     </div>
   );
 }

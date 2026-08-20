@@ -8,10 +8,63 @@
   }
   body {
     @apply bg-plane text-ink font-sans antialiased;
+    /* A faint vertical gradient reads as a lit instrument face rather than a flat fill. Fixed so it
+       does not travel with the scroll and turn into a visible band. */
+    background-image: radial-gradient(
+      120% 70% at 50% -10%,
+      rgba(87, 184, 224, 0.055) 0%,
+      transparent 62%
+    );
+    background-attachment: fixed;
   }
-  /* Proportional figures by default; tabular-nums is applied only inside price tables, where
-     column alignment matters more than natural spacing. */
-  .num-tabular {
+
+  /* Every figure the operator compares against another figure is tabular. Prices in a column that
+     shift by a pixel between rows are harder to scan than they look. */
+  .num {
+    @apply font-mono;
     font-variant-numeric: tabular-nums;
+  }
+
+  :focus-visible {
+    @apply outline-none ring-2 ring-series/70 ring-offset-2 ring-offset-plane;
+  }
+
+  ::selection {
+    background: rgba(255, 107, 74, 0.28);
+  }
+}
+
+@layer components {
+  /* The uppercase micro-label used on panel headers and field names. */
+  .eyebrow {
+    @apply font-mono text-[10px] uppercase tracking-[0.14em] text-ink-muted;
+  }
+}
+
+@layer utilities {
+  /* Scrollbars inside panels; the default light scrollbar on a dark panel is jarring. */
+  .scroll-slim {
+    scrollbar-width: thin;
+    scrollbar-color: theme("colors.axis") transparent;
+  }
+  .scroll-slim::-webkit-scrollbar {
+    width: 8px;
+  }
+  .scroll-slim::-webkit-scrollbar-thumb {
+    background: theme("colors.axis");
+    border-radius: 4px;
+  }
+  .scroll-slim::-webkit-scrollbar-track {
+    background: transparent;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
   }
 }
