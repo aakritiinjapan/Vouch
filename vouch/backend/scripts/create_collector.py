@@ -177,7 +177,7 @@ def main(argv: list[str] | None = None) -> None:
     print("NEXT STEPS")
     print("-" * 78)
     print(f"1. README section 9 - replace the placeholder with:  {collector_id}")
-    print(f"2. scripts/seed.py - set DEMO_COLLECTOR_ID = \"{collector_id}\"")
+    print(f"2. scripts/seed.py - set COLLECTOR_ID = \"{collector_id}\"")
     if names:
         print("3. scripts/seed.py - DEMO_PRODUCTS names must match rows from this page, e.g.:")
         for name in names[:3]:

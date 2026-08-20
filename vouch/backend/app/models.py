@@ -63,6 +63,10 @@ class Product(SQLModel, table=True):
     floor_margin: float = 0.10           # never propose a price below cost * (1 + floor_margin)
     competitor_url: str                  # the page we scrape for the competing price
     collector_id: Optional[str] = None   # Bright Data Scraper Studio collector (c_*)
+    # The price this product started the demo at, so /demo/reset can restore it from the row itself.
+    # Without it the reset had to reach into a seed script's module-level constant, which meant it
+    # silently failed to restore any product that constant did not happen to list.
+    seed_price: Optional[float] = None
     updated_at: datetime = Field(default_factory=_now)
 
 

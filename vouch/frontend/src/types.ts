@@ -177,3 +177,26 @@ export interface History {
   counterfactual: Counterfactual | null;
   last_confirmed_label: string;
 }
+
+/**
+ * One replay scenario the active dataset can honour, as a control the header can render.
+ *
+ * The dashboard renders its demo controls from the API rather than hard-coding them: the dataset
+ * derived from the live collector carries no `original_price`, so the crossed-out-price scenario
+ * genuinely cannot be replayed against it. Offering a button the data cannot honour would be a
+ * small lie in exactly the place this product claims not to tell one.
+ */
+export interface DemoHint {
+  key: string;
+  label: string;
+  detail: string;
+  /** "run" feeds simulate_run; "heal" feeds simulate_heal. */
+  stage: "run" | "heal";
+}
+
+export interface DemoHints {
+  mock_mode: boolean;
+  dataset: string;
+  dataset_note: string;
+  hints: DemoHint[];
+}

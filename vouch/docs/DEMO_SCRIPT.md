@@ -1,110 +1,123 @@
-# Demo script (≈5 minutes)
+# Demo script (3 minutes)
 
-Goal: make the guardian *visible* and the value *legible in money*. The judges should watch a bad
-self-heal get caught before it costs the seller margin.
+Three minutes, not five. Judges watch a lot of these, and the arc lands harder tight.
 
-## The core beat (memorize this arc)
+The order matters more than anything else here: **prove the collector is real in the first 45
+seconds, then let the product tell the story.** Leading with the dashboard invites the question "is
+any of this actually Bright Data?" and you spend the rest of the video answering it.
 
-> Normal repricing → a competitor site changes → the scraper heals but heals *wrong* → **Vouch
-> catches it and holds the price** → show what would've happened if it hadn't → fix and resume.
+Two windows: a terminal with real CLI output (captured in advance — see
+[`LIVE_CAPTURE.md`](LIVE_CAPTURE.md)) and the console at `http://127.0.0.1:5173`.
 
-## Triggering the "break" legitimately
+---
 
-You can't make a real site redesign on cue. Three honest ways to trigger the heal — pick one, and
-say plainly which you're doing (judges see this constantly; it's not faking data):
+## The arc
 
-- **A — Self-hosted mirror (default, most reliable).** Snapshot a real listing page's HTML, host it
-  as a static "v1", then deploy a "v2" with the price markup moved and a **shipping-cost element
-  placed where a naive heal will grab it**. Narrate: "this is a mirror of the real layout with the
-  markup changed, so we can trigger healing on demand." Deterministic — safe against demo-day flake.
-- **B — Wayback vs. live.** Build the collector against an old Archive.org snapshot, run/heal against
-  the current live site. The layout difference is 100% real. Risk: archived CSS/JS can be messy.
-- **C — Underspecified *heal* prompt (what we do).** Create the collector with a **precise**
-  description so the first extraction is correct — **that run becomes the baseline** — then heal it
-  with a deliberately **vague** prompt (the kind a hurried operator actually writes: *"the price
-  field looks wrong, re-capture the price near the delivery info"*). The heal grabs the shipping
-  cost, and the `awaiting_approval` envelope's real `preview_result` carries the swap. Zero hosting,
-  a real public page throughout, and a genuinely real heal.
-  > ⚠️ Do **not** underspecify the *create* step instead. Vouch validates a heal against a
-  > last-known-good baseline, so if the first extraction is the wrong one, the bad data *is* the
-  > baseline — and the guardian would flag the correct fix as the drift. The order matters.
+> A real collector → a real heal stopping at the approval gate → the guardian catching a heal that
+> would have repriced a $6,900 card to $19.99 → the re-prompt that fixes it.
 
-> **Rehearse in `MOCK_MODE`, qualify with a live collector.** The dashboard's *Simulate a bad heal*
-> and *Re-prompt & resume* buttons drive the whole arc deterministically off fixtures, so the demo
-> never depends on the network. But the submission rules require **at least one live `c_*` Collector
-> ID as proof of execution**, and a custom Scraper Studio scraper — so technique **C** is not
-> optional polish, it is what qualifies the entry. Build the collector early; demo off mock.
+---
 
-## Screen-by-screen
+## 0:00 — The product, on real data (20s)
 
-**0:00 — The product (15s).** Vouch dashboard: a few GPUs, current prices, a small batch of routine
-reprice proposals. "Sellers reprice against competitors all day. Vouch proposes changes — but only
-off data it can vouch for."
+Console already loaded, in the confirmed state. Nothing held.
 
-**0:30 — Normal cycle (30s).** Click **Approve all safe changes**. Prices update. "Routine changes
-flow through in one click. The point of Vouch is what happens when the data *can't* be trusted."
+> "This is a repricer. It watches competitor prices and proposes changes — but only off data it can
+> vouch for. The competitor data comes from a Scraper Studio collector I built from the CLI."
 
-**1:00 — The break (45s).** Trigger it (technique A). Show the event log: `run: price null on 6/8
-rows → heal proposed → awaiting approval`. "Newegg redesigned overnight. Scraper Studio healed
-itself automatically — the data's flowing again." *(beat)* "But watch what it healed *to*."
+The collector id sits under the title. Let it be visible.
 
-**1:45 — The catch (60s) — the heart of it.** The guardian runs. A **held card** appears:
+## 0:20 — The collector is real (25s)
+
+Cut to the terminal. Real `scraper run` output scrolling — 96 graphics cards, names, prices,
+shipping, stock.
+
+> "Ninety-six cards off Newegg's public category page, one request."
+
+## 0:45 — The heal stops at the gate (30s) — the most important beat
+
+Still in the terminal. Real `scraper heal`. It pauses at `awaiting_approval` and hands back
+`preview_result`.
+
+> "Scraper Studio heals itself when a page changes. Without `--auto-approve` it stops here and hands
+> you `preview_result` — the rows the fix *would* produce. Scraper Studio's own approval screen shows
+> you a code diff. The CLI gives you the data. That gap is where this whole product lives."
+
+Nobody else in this hackathon will have found this. Do not rush it.
+
+## 1:15 — The catch (60s) — the heart of it
+
+Back to the console. Click **Replay: shipping swap**.
+
+Say the honest thing once, early, then move on:
+
+> "This particular failure is a captured scenario replayed offline — I can't make Newegg redesign on
+> cue. The data is their real data; the guardian running on it is the real guardian."
+
+Three held cards appear. Read the top one:
 
 ```
-⏸  Reprice held · "MSI RTX 5080 Gaming Trio"
+⏸  Reprice held · COLUMN_SWAP
+    ZOTAC ARCTICSTORM AIO GeForce RTX 5090 32GB
+
+    −$951.00     per unit of margin, on every one sold, had we auto-approved
+
     The healed price ($19.99) matches this competitor's SHIPPING column, not their item price.
-    Confidence: 40 / 100   ·   source: newegg-mirror (unconfirmed)   ·   check: COLUMN_SWAP
-    [ Investigate ]   [ Approve anyway ]   [ Skip this cycle ]
+    40 / 100  ✕ failed   ·   source: www.newegg.com · unconfirmed
 ```
 
-"The heal *worked* — right rows, right format. But it silently swapped price and shipping. A normal
-repricer would now match a $20 competitor and destroy the margin. Vouch caught it and **held the
-change** — because we never reprice off a number we can't verify."
+> "The heal worked. Right rows, right format, right types — and it silently started reading the
+> shipping column. Newegg lists this card at six thousand nine hundred dollars with nineteen
+> ninety-nine shipping. A repricer acting on that number matches a competitor that doesn't exist."
 
-**2:45 — The counterfactual (45s).** Expand *"What if we'd auto-approved this?"*
+Click **Show the damage** on the top card.
 
-Lead with the honest number: **−$165.98 per unit**, margin **19.2% → 7.4%**. Our own floor rule would
-have clamped the price to **$1,134.00**, not followed the competitor down to $20 — say so, because it
-pre-empts the first question a sharp judge will ask. Then land the point: *"a repricer **without** a
-floor rule goes to $19.98 — margin −5,155%. A floor caps the disaster; only verifying the number
-prevents the damage."*
+> "Our floor rule would have clamped us to $6,048 rather than following it all the way down — margin
+> twenty percent to seven. Without a floor you go to $19.98. A floor caps the disaster; only checking
+> the number prevents it. And notice the chart refuses to draw a line across the cycle it couldn't
+> verify — that's a hole in the data, not a guess."
 
-The chart shows the honest gap for the held cycle — a hole in the data, not an invented straight
-line — with the counterfactual dashed off the end.
+## 2:15 — The re-prompt (30s) — do not cut this
 
-**3:30 — Resume (45s).** Re-prompt the heal with the guardian's diagnosis → second heal targets the
-right element → guardian verifies → **confidence 100/100, source confirmed** → the held card clears
-(the hold is marked *superseded*, not rejected — the seller never declined it) and a normal proposal
-appears. "Sharper heal, re-validated, and now it's a change the seller can trust. One click."
+Click **Investigate** on the same card, then **Re-prompt & resume**.
 
-> Show the sharpened prompt itself, from the event log's *show the re-prompt* toggle. Vouch's
-> validator writing Scraper Studio's next instruction is the most legible proof that we wrapped the
-> heal loop rather than bolted onto it.
+> "Here's the guardian's working — the proposed median was zero, against a historical median of eight
+> hundred and ten. And this is the instruction it wrote back to Scraper Studio from those numbers.
+> The validator writes the scraper's next prompt."
 
-## Optional beat (if you have 45s spare, or for the Q&A)
+The second heal passes, the holds clear as superseded, and normal proposals appear.
 
-Press **Bad heal: original price**. This is the same story with the volume turned down: the heal now
-reads the *crossed-out* price instead of the sale price - only ~14% off, not 100x.
+> "Sharper prompt, re-validated, confidence 100. Now it's a change the seller can act on."
+
+## 2:45 — Close (15s)
+
+> "Scraper Studio keeps the data flowing when a site changes. Vouch makes sure it didn't quietly
+> start lying — inside a product where trusting the number is the whole job."
+
+End with the collector id on screen.
+
+---
+
+## Rules for the recording
+
+- **Never show a replay button before you have shown real CLI output.** Order is the whole
+  credibility argument.
+- **Say "replayed" once, early, plainly.** Pre-empting costs nothing; being caught costs the track.
+- **Don't say "we studied what wins hackathons."** Not in the video, not in Q&A.
+- **Rehearse twice on the machine you'll record on.** `./demo.sh --reset` returns the console to the
+  opening state between takes.
+
+## The optional beat (Q&A, or if you have 30s spare)
+
+Against the hand-written dataset (`DEMO_DATASET=sample_runs`) there is a fourth control: **Replay:
+crossed-out price**. The heal reads the struck-through original instead of the sale price — only
+~14% off.
 
 > "This is the one a distribution check cannot catch. Fourteen percent is a plausible price move, so
-> nothing statistical fires. What catches it is an invariant: a sale price can never be higher than the
-> price it is discounted from. And notice the harm flips - here we'd have priced *above* the market and
-> lost the sale, not undercut ourselves. No floor rule helps you in that direction. Only checking the
-> number does."
+> nothing statistical fires. What catches it is an invariant: a sale price can never be higher than
+> the price it's discounted from. And the harm flips — here we'd price *above* the market and lose
+> the sale, not undercut ourselves. No floor rule helps in that direction."
 
-Worth having ready even if you cut it: it is the sharpest answer to "couldn't you just threshold on
-price change?", and it shows the guardian is a battery of different kinds of evidence rather than one
-statistic with a knob on it.
-
-**4:15 — Close (30s).** "Scraper Studio heals the scraper. Vouch makes sure the heal didn't start
-lying — inside a product where trusting the number is the whole job." Land on the criteria: *use of
-Scraper Studio* (we wrap its heal loop), *reliability & self-healing* (that's the product),
-*impact* (margin saved), *clean code* (the tiered validator is tested).
-
-## Do / don't
-
-- **Do** use real Scraper-Studio vocabulary in the event log ("heal proposed", "awaiting approval",
-  "approved and committed"). It signals you understood the tool.
-- **Do** show honest data state — a gap in the price chart for the held cycle, not a fake straight line.
-- **Don't** show a "healing…" spinner as if it were the feature. The feature is the *held decision*.
-- **Don't** over-scope the live demo. MOCK_MODE + technique A is the reliable spine; live site is a bonus.
+It is absent from the live-derived dataset on purpose: the real collector never captured
+`original_price`, so the console does not offer a control its data cannot honour. That is worth
+saying out loud if anyone asks — it is the same honesty the product is built on.

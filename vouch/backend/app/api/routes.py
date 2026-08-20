@@ -28,7 +28,7 @@ from app.models import (
     RepriceProposal,
 )
 from app.scraper import baseline as baseline_capture
-from app.scraper.brightdata import _FIXTURES
+from app.scraper.brightdata import fixture_path
 
 router = APIRouter()
 
@@ -39,8 +39,49 @@ def _fixture_keys() -> set[str]:
     A typo therefore fails at the door with a 422 listing the real keys, instead of surfacing as a
     KeyError behind a spinner mid-demo.
     """
-    data = json.loads(Path(_FIXTURES).read_text(encoding="utf-8"))
+    data = json.loads(fixture_path().read_text(encoding="utf-8"))
     return {k for k in data if not k.startswith("_")}
+
+
+# Every scenario the demo controls can offer, in the order they should be presented. A scenario only
+# reaches the dashboard if its key is actually present in the active fixture - see demo_hints.
+_HINT_CATALOGUE: list[dict] = [
+    {
+        "key": "run_degraded",
+        "label": "Replay: degraded run",
+        "detail": "The collector comes back with 'price' empty on 3 of 4 rows, which is what trips "
+                  "the degradation gate and triggers a heal in the first place.",
+        "stage": "run",
+    },
+    {
+        "key": "healed_swapped",
+        "label": "Replay: shipping swap",
+        "detail": "The heal starts reading the shipping element instead of the price element. Off "
+                  "by 100x or more, so COLUMN_SWAP catches it on distribution alone.",
+        "stage": "heal",
+    },
+    {
+        "key": "healed_swapped_original",
+        "label": "Replay: crossed-out price",
+        "detail": "The heal reads the struck-through original instead of the sale price. Only ~14% "
+                  "off, so no distributional check fires - ONLY the price <= original_price "
+                  "invariant catches it.",
+        "stage": "heal",
+    },
+    {
+        "key": "healed_good",
+        "label": "Replay: clean heal",
+        "detail": "A correct heal against a page whose prices moved slightly. The guardian should "
+                  "pass this one - proving it does not simply distrust everything.",
+        "stage": "heal",
+    },
+]
+
+_DATASET_NOTES = {
+    "newegg_live": "derived from the real 96-row run of collector c_mszq0z1x27brru3wab against "
+                   "Newegg's GPU category page",
+    "sample_runs": "the hand-written demo set, which also carries original_price",
+}
 
 
 def _fail(err: service.ServiceError):
@@ -61,8 +102,8 @@ def list_products(session: Session = Depends(session_dep)):
 @router.get("/products/{product_id}/history", response_model=schemas.HistoryOut)
 def product_history(product_id: int, session: Session = Depends(session_dep)):
     """The price chart. `competitor_price` is null on an unconfirmed cycle so the gap is in the data
-    itself - README section 7's honest-staleness rule, enforced server-side rather than by asking the
-    renderer to remember."""
+    itself - honest staleness enforced server-side, rather than by asking the renderer to remember
+    not to interpolate across it."""
     product = session.get(Product, product_id)
     if product is None:
         raise HTTPException(404, detail={"detail": f"product {product_id} not found"})
@@ -251,6 +292,25 @@ def run_cycles(body: schemas.CycleRunRequest = Body(default=schemas.CycleRunRequ
 # demo reset
 # --------------------------------------------------------------------------------------
 
+@router.get("/demo/hints", response_model=schemas.DemoHintsOut)
+def demo_hints():
+    """Which replay scenarios the active dataset can actually honour.
+
+    The dashboard renders its demo controls from this rather than hard-coding them, so a dataset
+    that cannot produce a given failure never offers a button for it. The live-derived dataset has
+    no `original_price` - the collector did not capture one - so the value-ordering scenario is
+    absent there and present against the hand-written set.
+    """
+    available = _fixture_keys() if settings.mock_mode else set()
+    return schemas.DemoHintsOut(
+        mock_mode=settings.mock_mode,
+        dataset=settings.demo_dataset,
+        dataset_note=_DATASET_NOTES.get(settings.demo_dataset, ""),
+        hints=[schemas.DemoHintOut(**hint) for hint in _HINT_CATALOGUE
+               if hint["key"] in available],
+    )
+
+
 @router.post("/demo/reset")
 def demo_reset(session: Session = Depends(session_dep)):
     """Restore the demo's opening state.
@@ -262,8 +322,6 @@ def demo_reset(session: Session = Depends(session_dep)):
     if not settings.mock_mode:
         raise HTTPException(404, detail={"detail": "demo reset is only available in MOCK_MODE"})
 
-    from scripts.seed import DEMO_PRODUCTS
-
     deleted = {"proposals": 0, "heal_events": 0, "observations": 0}
     for model, key in ((RepriceProposal, "proposals"), (HealEvent, "heal_events"),
                        (CompetitorObservation, "observations")):
@@ -273,13 +331,17 @@ def demo_reset(session: Session = Depends(session_dep)):
             session.delete(row)
     session.commit()
 
-    seed_prices = {p["sku"]: p["my_price"] for p in DEMO_PRODUCTS}
+    # Prices come back from the row's own seed_price, not from a seed script's constant. The API
+    # layer importing from scripts/ was backwards, and it meant reset silently skipped any product
+    # that constant did not list - which is every product in a database seeded some other way.
+    restored = 0
     for product in session.exec(select(Product)).all():
-        if product.sku in seed_prices:
-            product.my_price = seed_prices[product.sku]
+        if product.seed_price is not None and product.my_price != product.seed_price:
+            product.my_price = product.seed_price
             session.add(product)
+            restored += 1
 
-    rows = json.loads(Path(_FIXTURES).read_text(encoding="utf-8"))["baseline"]
+    rows = json.loads(fixture_path().read_text(encoding="utf-8"))["baseline"]
     profiles, count = baseline_capture.capture(rows)
     for baseline in session.exec(select(Baseline)).all():
         baseline.field_profiles = profiles
@@ -293,4 +355,4 @@ def demo_reset(session: Session = Depends(session_dep)):
     history = _seed_history(session, list(products), rows)
 
     return {"reset": True, "deleted": deleted, "history_observations": history,
-            "products": len(products)}
+            "products": len(products), "prices_restored": restored}
