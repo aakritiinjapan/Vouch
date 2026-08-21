@@ -200,3 +200,31 @@ export interface DemoHints {
   dataset_note: string;
   hints: DemoHint[];
 }
+
+/** The stateless trust primitive: POST /verify request. */
+export interface VerifyRequest {
+  candidate_records: Record<string, unknown>[];
+  baseline_records?: Record<string, unknown>[];
+  baseline_profiles?: Record<string, Record<string, unknown>>;
+  baseline_count?: number;
+  is_sample?: boolean;
+  use_judge?: boolean;
+}
+
+export interface VerifyFailure {
+  code: string;
+  severity: string;
+  field: string;
+  message: string;
+  evidence: Record<string, unknown>;
+}
+
+/** The raw verdict JSON — the same object the console acts on, decoupled from repricing. */
+export interface VerifyResponse {
+  decision: string; // pass | review | fail
+  confirmed: boolean;
+  confidence: number; // 0-100
+  brief: string;
+  failures: VerifyFailure[];
+  judge_consulted: boolean;
+}

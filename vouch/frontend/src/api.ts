@@ -9,6 +9,8 @@ import type {
   History,
   Product,
   Proposal,
+  VerifyRequest,
+  VerifyResponse,
 } from "./types";
 
 const BASE = "/api";
@@ -83,6 +85,16 @@ export const api = {
     simulate_heal?: string | string[] | null;
   } = {}) =>
     request<CycleRunResponse>("/cycles/run", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+
+  /**
+   * The trust layer laid bare: run the guardian over caller-supplied rows and get back the raw
+   * verdict — no product, no repricing, no writes. This is the "any pipeline can plug in" surface.
+   */
+  verify: (body: VerifyRequest) =>
+    request<VerifyResponse>("/verify", {
       method: "POST",
       body: JSON.stringify(body),
     }),
