@@ -48,14 +48,14 @@ export default function App() {
       <Nav view={route.view} navigate={navigate} />
 
       {vouch.error && (
-        <div className="mx-auto mt-4 max-w-[1280px] px-5">
-          <div className="rounded-md border border-status-critical/40 bg-status-critical/10 px-4 py-2 text-xs text-status-critical">
+        <div className="mx-auto mt-4 max-w-[1200px] px-6">
+          <div className="rounded-md border border-held/40 bg-held/10 px-4 py-2 text-xs text-held">
             {vouch.error}
           </div>
         </div>
       )}
       {vouch.notice && (
-        <div className="mx-auto mt-4 max-w-[1280px] px-5">
+        <div className="mx-auto mt-4 max-w-[1200px] px-6">
           <button
             type="button"
             onClick={vouch.dismissNotice}

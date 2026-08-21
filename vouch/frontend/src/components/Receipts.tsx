@@ -1,15 +1,16 @@
 /**
  * HOW VOUCH DECIDED — the live, plain-English receipts.
  *
- * Secondary to the held card, but it carries the same Verdict Seal, so a viewer sees the identical
- * object in the receipt, on the card, and in the Trust API. The step vocabulary is generated
- * server-side (service.heal_log_entries); `kind` carries the emphasis so nothing here parses prose.
+ * The right rail — a hairline-divided region, not a box. Secondary to the held card, but it carries
+ * the same Verdict Gauge, so a viewer sees the identical object in the receipt, on the card, and in
+ * the Trust API. The step vocabulary is generated server-side (service.heal_log_entries); `kind`
+ * carries the emphasis so nothing here parses prose.
  */
 
 import type { HealEvent, LogKind } from "../types";
 import { toDecision } from "../verdict";
-import { VerdictSeal } from "./VerdictSeal";
-import { Card, EmptyState, SectionHeader } from "./ui/Bits";
+import { VerdictGauge } from "./VerdictGauge";
+import { EmptyState } from "./ui/Bits";
 
 const KIND_MARK: Record<LogKind, string> = {
   run: "1",
@@ -21,12 +22,14 @@ const KIND_MARK: Record<LogKind, string> = {
 
 export function Receipts({ events }: { events: HealEvent[] }) {
   return (
-    <Card className="lg:sticky lg:top-6">
-      <SectionHeader
-        title="How Vouch decided"
-        count={events.length}
-        hint="Live, plain-English receipts — the same verdict, everywhere."
-      />
+    <div className="lg:sticky lg:top-24">
+      <div className="mb-1 flex flex-wrap items-baseline gap-x-2">
+        <h2 className="font-display text-h2 font-semibold text-ink">How Vouch decided</h2>
+        <span className="num text-xs text-ink-muted">{events.length}</span>
+      </div>
+      <p className="mb-4 text-xs text-ink-muted">
+        Live, plain-English receipts — the same verdict, everywhere.
+      </p>
 
       {events.length === 0 ? (
         <EmptyState
@@ -35,7 +38,7 @@ export function Receipts({ events }: { events: HealEvent[] }) {
         />
       ) : (
         <ol
-          className="scroll-slim max-h-[min(64vh,42rem)] divide-y divide-hair overflow-y-auto"
+          className="scroll-slim max-h-[min(68vh,44rem)] divide-y divide-hair overflow-y-auto"
           style={{
             maskImage: "linear-gradient(to bottom, black calc(100% - 24px), transparent 100%)",
             WebkitMaskImage: "linear-gradient(to bottom, black calc(100% - 24px), transparent 100%)",
@@ -44,7 +47,7 @@ export function Receipts({ events }: { events: HealEvent[] }) {
           {events.map((event) => {
             const decision = toDecision(event.verdict, event.proposed_confidence);
             return (
-              <li key={event.id} className="px-5 py-3">
+              <li key={event.id} className="py-4 first:pt-0">
                 <div className="flex items-baseline justify-between gap-2">
                   <p className="truncate text-xs font-semibold text-ink">
                     {event.product?.name ?? event.collector_id}{" "}
@@ -53,8 +56,8 @@ export function Receipts({ events }: { events: HealEvent[] }) {
                   <time className="shrink-0 text-[10px] text-ink-muted">{event.created_label}</time>
                 </div>
 
-                <div className="mt-2 flex gap-3">
-                  <ol className="min-w-0 flex-1 space-y-1">
+                <div className="mt-2.5 flex gap-3">
+                  <ol className="min-w-0 flex-1 space-y-1.5">
                     {event.entries.map((entry, i) => (
                       <li
                         key={i}
@@ -62,7 +65,7 @@ export function Receipts({ events }: { events: HealEvent[] }) {
                       >
                         <span
                           aria-hidden
-                          className="grid size-4 shrink-0 place-items-center rounded-full bg-raised font-mono text-[9px] text-ink-muted"
+                          className="grid size-4 shrink-0 place-items-center rounded-full border border-hair font-mono text-[9px] text-ink-muted"
                         >
                           {KIND_MARK[entry.kind]}
                         </span>
@@ -70,20 +73,20 @@ export function Receipts({ events }: { events: HealEvent[] }) {
                       </li>
                     ))}
                   </ol>
-                  <VerdictSeal
+                  <VerdictGauge
                     decision={decision}
                     score={event.proposed_confidence}
-                    size={56}
+                    size={54}
                     animate={false}
                   />
                 </div>
 
                 {event.attempt > 1 && (
-                  <details className="mt-2">
+                  <details className="mt-2.5">
                     <summary className="cursor-pointer text-[10px] text-ink-muted hover:text-ink-secondary">
                       show the re-prompt
                     </summary>
-                    <p className="mt-1 rounded bg-raised/60 p-2 font-mono text-[10px] leading-relaxed text-ink-secondary">
+                    <p className="mt-1.5 rounded-md border border-hair bg-white/[0.02] p-2.5 font-mono text-[10px] leading-relaxed text-ink-secondary">
                       {event.prompt}
                     </p>
                   </details>
@@ -93,6 +96,6 @@ export function Receipts({ events }: { events: HealEvent[] }) {
           })}
         </ol>
       )}
-    </Card>
+    </div>
   );
 }

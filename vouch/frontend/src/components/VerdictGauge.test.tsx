@@ -2,30 +2,30 @@ import { describe, expect, it, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
-import { VerdictChip, VerdictSeal } from "./VerdictSeal";
+import { VerdictChip, VerdictGauge } from "./VerdictGauge";
 
-describe("VerdictSeal", () => {
+describe("VerdictGauge", () => {
   it("renders the score and a PASS state with an accessible label", () => {
-    render(<VerdictSeal decision="pass" score={100} />);
-    const seal = screen.getByRole("img", { name: /pass/i });
-    expect(seal).toHaveAttribute("aria-label", expect.stringContaining("100"));
-    expect(seal).toHaveAttribute("aria-label", expect.stringMatching(/high/i));
+    render(<VerdictGauge decision="pass" score={100} />);
+    const gauge = screen.getByRole("img", { name: /pass/i });
+    expect(gauge).toHaveAttribute("aria-label", expect.stringContaining("100"));
+    expect(gauge).toHaveAttribute("aria-label", expect.stringMatching(/high/i));
     expect(screen.getByText("100")).toBeInTheDocument();
   });
 
   it("renders a FAIL state reflecting decision and score", () => {
-    render(<VerdictSeal decision="fail" score={40} />);
-    const seal = screen.getByRole("img", { name: /fail/i });
-    expect(seal.getAttribute("aria-label")).toMatch(/40/);
-    expect(seal.getAttribute("aria-label")).toMatch(/low/i);
+    render(<VerdictGauge decision="fail" score={40} />);
+    const gauge = screen.getByRole("img", { name: /fail/i });
+    expect(gauge.getAttribute("aria-label")).toMatch(/40/);
+    expect(gauge.getAttribute("aria-label")).toMatch(/low/i);
     expect(screen.getByText("40")).toBeInTheDocument();
   });
 
-  it("hides the illegible microtext at small (chip/receipt) sizes but keeps the score and label", () => {
-    render(<VerdictSeal decision="fail" score={40} size={54} />);
-    // score glyph stays
+  it("drops the ticks and glyph at small (chip/receipt) sizes but keeps the score and a11y label", () => {
+    render(<VerdictGauge decision="fail" score={40} size={54} />);
+    // score stays
     expect(screen.getByText("40")).toBeInTheDocument();
-    // the inner FAIL/band microtext is dropped
+    // the inner FAIL glyph is dropped at compact size
     expect(screen.queryByText("FAIL")).not.toBeInTheDocument();
     // but the decision is still announced accessibly
     expect(screen.getByRole("img", { name: /fail/i })).toBeInTheDocument();

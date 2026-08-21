@@ -1,8 +1,8 @@
 /**
  * The core of the console: a decision the guardian refused to make for you.
  *
- * Card order follows UI_PLAN: price facts → Verdict Seal → plain-English reason → consequence +
- * "show the damage" → actions. The seal is the pivot; the same object appears in the receipts and the
+ * Card order follows UI_PLAN: price facts → Verdict Gauge → plain-English reason → consequence +
+ * "show the damage" → actions. The gauge is the pivot; the same object appears in the receipts and the
  * Trust API, and `view as API →` bridges this exact row to that surface.
  *
  * Every value is supplied by the backend — the lead sentence is composed from the stored observation
@@ -16,7 +16,7 @@ import { money, pct, signedMoney } from "../format";
 import type { History, Proposal } from "../types";
 import { toDecision } from "../verdict";
 import { PriceChart } from "./PriceChart";
-import { VerdictSeal } from "./VerdictSeal";
+import { VerdictGauge } from "./VerdictGauge";
 import { Badge, Button, CheckBadge } from "./ui/Bits";
 import { TrustLegend } from "./TrustLegend";
 
@@ -79,11 +79,11 @@ function EvidencePanel({
   const rows = Object.entries(guardian.evidence ?? {});
 
   return (
-    <div className="mt-3 animate-rise rounded-lg border border-hair bg-raised/50 p-4">
+    <div className="mt-4 animate-reveal rounded-lg border border-hair bg-white/[0.02] p-4">
       <p className="eyebrow">The guardian&rsquo;s working</p>
 
       {rows.length > 0 ? (
-        <dl className="mt-2.5 grid grid-cols-[minmax(0,1fr)_auto] gap-x-6 gap-y-1.5 text-xs">
+        <dl className="mt-3 grid grid-cols-[minmax(0,1fr)_auto] gap-x-6 gap-y-2 text-xs">
           {rows.map(([key, value]) => (
             <div key={key} className="contents">
               <dt className="min-w-0 text-ink-muted">
@@ -104,7 +104,7 @@ function EvidencePanel({
         <p className="eyebrow">
           What we told the scraper to fix · attempt {guardian.attempt} of {guardian.attempts_total}
         </p>
-        <p className="mt-2 whitespace-pre-wrap rounded border border-hair bg-surface px-3 py-2 font-mono text-[11px] leading-relaxed text-ink-secondary">
+        <p className="mt-2 whitespace-pre-wrap rounded-md border border-hair bg-canvas px-3 py-2.5 font-mono text-[11px] leading-relaxed text-ink-secondary">
           {guardian.prompt}
         </p>
         <p className="mt-2 text-[11px] text-ink-muted text-pretty">
@@ -119,7 +119,7 @@ function EvidencePanel({
           <button
             type="button"
             onClick={onViewAsApi}
-            className="text-xs font-semibold text-holo-violet hover:underline"
+            className="text-xs font-semibold text-brand hover:text-brand-soft hover:underline"
           >
             view this verdict as API →
           </button>
@@ -147,32 +147,28 @@ function CounterfactualPanel({ proposal }: { proposal: Proposal }) {
   if (!cf) return null;
 
   return (
-    <div className="mt-3 animate-rise rounded-lg border border-hair bg-raised/50 p-4">
+    <div className="mt-4 animate-reveal rounded-lg border border-hair bg-white/[0.02] p-4">
       <p className="eyebrow">What acting on this would have done</p>
-      <dl className="mt-2.5 grid grid-cols-2 gap-x-6 gap-y-1.5 text-xs sm:grid-cols-4">
+      <dl className="mt-3 grid grid-cols-2 gap-x-6 gap-y-2 text-xs sm:grid-cols-4">
         <div className="contents">
           <dt className="text-ink-muted">Our price</dt>
           <dd className="num text-right sm:text-left">
             <span className="text-ink-secondary">{money(cf.current_price)}</span>
             <span className="text-ink-muted"> → </span>
-            <span className="text-status-critical">{money(cf.applied_price)}</span>
+            <span className="text-held">{money(cf.applied_price)}</span>
           </dd>
           <dt className="text-ink-muted">Our margin</dt>
           <dd className="num text-right sm:text-left">
             <span className="text-ink-secondary">{pct(cf.margin_pct_now)}</span>
             <span className="text-ink-muted"> → </span>
-            <span
-              className={
-                cf.harm === "competitiveness" ? "text-ink-secondary" : "text-status-critical"
-              }
-            >
+            <span className={cf.harm === "competitiveness" ? "text-ink-secondary" : "text-held"}>
               {pct(cf.margin_pct_applied)}
             </span>
           </dd>
         </div>
       </dl>
 
-      <p className="mt-3 border-l-2 border-status-critical/40 pl-3 text-xs leading-relaxed text-ink-secondary text-pretty">
+      <p className="mt-3 border-l-2 border-held/50 pl-3 text-xs leading-relaxed text-ink-secondary text-pretty">
         {cf.harm_summary}{" "}
         {cf.harm === "margin" ? (
           <>
@@ -202,7 +198,7 @@ function Fact({ label, children }: { label: string; children: React.ReactNode })
   return (
     <div>
       <dt className="eyebrow">{label}</dt>
-      <dd className="num mt-1 text-sm text-ink">{children}</dd>
+      <dd className="num mt-1.5 text-sm text-ink">{children}</dd>
     </div>
   );
 }
@@ -231,27 +227,27 @@ export function HeldCard({
   const toggle = (next: Panel) => setPanel((current) => (current === next ? "none" : next));
 
   return (
-    <article className="animate-rise overflow-hidden rounded-2xl bg-surface shadow-held">
-      <div className="h-[3px] bg-holo-cta bg-[length:200%_auto] animate-sheen" />
+    <article className="animate-reveal overflow-hidden rounded-lg border border-held/25 bg-surface shadow-held">
+      <div className="h-[3px] bg-held/80" />
 
-      <div className="px-5 pt-4">
+      <div className="px-6 pt-5">
         <div className="flex flex-wrap items-center gap-2">
-          <h3 className="flex items-center gap-2 text-[13px] font-semibold tracking-tight text-ink">
+          <h3 className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.12em] text-held">
             <span
-              className="inline-block size-2 animate-holdpulse rounded-full bg-status-critical"
+              className="inline-block size-2 animate-holdpulse rounded-full bg-held"
               aria-hidden
             />
             Reprice on hold
           </h3>
           {proposal.guardian?.check_code && <CheckBadge code={proposal.guardian.check_code} />}
         </div>
-        <p className="mt-1 truncate text-xs text-ink-secondary" title={proposal.product.name}>
-          {proposal.product.name} · vs Newegg
+        <p className="mt-2 truncate text-sm font-medium text-ink" title={proposal.product.name}>
+          {proposal.product.name} <span className="text-ink-muted">· vs Newegg</span>
         </p>
       </div>
 
       {/* 1. price facts */}
-      <dl className="mt-4 grid grid-cols-3 gap-3 px-5">
+      <dl className="mt-5 grid grid-cols-3 gap-4 px-6">
         <Fact label="Our price">{money(proposal.current_price)}</Fact>
         <Fact label="Our margin">
           {pct(proposal.margin_pct_now)}{" "}
@@ -260,20 +256,22 @@ export function HeldCard({
           </span>
         </Fact>
         <Fact label="Competitor price">
-          <span className="text-status-criticalInk">⚠ couldn&rsquo;t verify</span>
+          <span className="text-held">⚠ couldn&rsquo;t verify</span>
         </Fact>
       </dl>
 
-      {/* 2. Verdict Seal + 3. plain-English reason */}
-      <div className="mt-4 flex items-start gap-4 px-5">
-        <VerdictSeal decision={decision} score={proposal.confidence} size={92} />
+      {/* 2. Verdict Gauge + 3. plain-English reason */}
+      <div className="mt-6 flex items-center gap-5 px-6">
+        <VerdictGauge decision={decision} score={proposal.confidence} size={104} />
         <div className="min-w-0">
-          <p className="text-sm leading-relaxed text-ink text-pretty">{leadSentence(proposal)}</p>
+          <p className="text-[15px] leading-relaxed text-ink text-pretty">
+            {leadSentence(proposal)}
+          </p>
           {onViewAsApi && (
             <button
               type="button"
               onClick={() => onViewAsApi(proposal)}
-              className="mt-2 text-xs font-semibold text-holo-violet hover:underline"
+              className="mt-2.5 text-xs font-semibold text-brand hover:text-brand-soft hover:underline"
             >
               view as API →
             </button>
@@ -281,45 +279,48 @@ export function HeldCard({
         </div>
       </div>
 
-      <p className="mt-3 px-5 text-xs text-ink-muted">
-        source: <span className="text-ink-secondary">{new URL(proposal.source.url).hostname}</span>{" "}
-        · <Badge tone="critical">unconfirmed</Badge> · {proposal.source.last_confirmed_label}
+      <p className="mt-3.5 px-6 text-xs text-ink-muted">
+        source: <span className="text-ink-secondary">{new URL(proposal.source.url).hostname}</span> ·{" "}
+        <Badge tone="critical">unconfirmed</Badge> · {proposal.source.last_confirmed_label}
       </p>
 
       {/* 4. consequence */}
       {cf && (
-        <div className="mt-3 flex flex-wrap items-baseline gap-x-2 px-5">
+        <div className="mt-4 flex flex-wrap items-baseline gap-x-2.5 px-6">
           <span className="eyebrow">If auto-applied</span>
-          <span className="num text-lg font-bold text-status-critical">
+          <span className="num text-xl font-bold text-held">
             {signedMoney(cf.profit_delta_vs_now)}
           </span>
           <span className="text-xs text-ink-muted text-pretty">
             {cf.harm === "competitiveness"
-              ? "per unit above today’s price — we’d lose the sale"
+              ? "per unit above today's price — we'd lose the sale"
               : "per unit of margin, on every one sold"}
           </span>
         </div>
       )}
 
-      <div className="mt-3 px-5">
+      <div className="mt-4 px-6">
         <TrustLegend />
       </div>
 
       {panel === "evidence" && (
-        <div className="px-5">
-          <EvidencePanel proposal={proposal} onViewAsApi={onViewAsApi && (() => onViewAsApi(proposal))} />
+        <div className="px-6">
+          <EvidencePanel
+            proposal={proposal}
+            onViewAsApi={onViewAsApi && (() => onViewAsApi(proposal))}
+          />
         </div>
       )}
       {panel === "counterfactual" && (
-        <div className="px-5">
+        <div className="px-6">
           <CounterfactualPanel proposal={proposal} />
         </div>
       )}
 
-      <div className="mt-4 flex flex-wrap items-center gap-2 border-t border-hair px-5 py-3">
+      <div className="mt-5 flex flex-wrap items-center gap-2 border-t border-hair px-6 py-4">
         {confirming ? (
           <>
-            <p className="mr-auto text-xs text-status-warning">
+            <p className="mr-auto text-xs text-watch">
               Apply {applied !== null ? money(applied) : "the clamped floor price"} despite
               confidence {proposal.confidence}/100?
             </p>

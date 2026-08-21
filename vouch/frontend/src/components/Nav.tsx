@@ -1,6 +1,7 @@
 /**
  * The shared top nav for the app surfaces (Console · Trust API), with the tenant identity always in
- * the top-right so a viewer never loses their place. The hero has its own lighter nav.
+ * the top-right so a viewer never loses their place. One continuous dark surface — the hero shares
+ * the same wordmark and identity treatment.
  */
 
 import type { Navigate, View } from "../hooks/useRoute";
@@ -13,8 +14,8 @@ const TABS: { view: View; label: string }[] = [
 
 export function Nav({ view, navigate }: { view: View; navigate: Navigate }) {
   return (
-    <header className="sticky top-0 z-20 border-b border-hair bg-paper/85 backdrop-blur">
-      <div className="mx-auto flex max-w-[1280px] flex-wrap items-center gap-x-6 gap-y-2 px-5 py-3">
+    <header className="sticky top-0 z-20 border-b border-hair bg-canvas/80 backdrop-blur-md">
+      <div className="mx-auto flex max-w-[1200px] flex-wrap items-center gap-x-6 gap-y-2 px-6 py-3.5">
         <button
           type="button"
           onClick={() => navigate("home")}
@@ -33,10 +34,10 @@ export function Nav({ view, navigate }: { view: View; navigate: Navigate }) {
                 type="button"
                 onClick={() => navigate(tab.view)}
                 aria-current={active ? "page" : undefined}
-                className={`rounded-full px-3 py-1.5 text-sm font-medium transition-colors ${
+                className={`rounded-full px-3.5 py-1.5 text-sm font-medium transition-colors ${
                   active
-                    ? "bg-ink text-paper"
-                    : "text-ink-muted hover:bg-raised hover:text-ink"
+                    ? "bg-white/[0.08] text-ink"
+                    : "text-ink-muted hover:bg-white/[0.05] hover:text-ink"
                 }`}
               >
                 {tab.label}
@@ -45,8 +46,8 @@ export function Nav({ view, navigate }: { view: View; navigate: Navigate }) {
           })}
         </nav>
 
-        <div className="ml-auto flex min-w-0 items-center gap-2 text-sm text-ink-secondary">
-          <span className="grid size-6 shrink-0 place-items-center rounded-md bg-holo-cta text-xs font-bold text-white">
+        <div className="ml-auto flex min-w-0 items-center gap-2.5 text-sm text-ink-secondary">
+          <span className="grid size-6 shrink-0 place-items-center rounded-md bg-aurora text-xs font-bold text-canvas">
             V
           </span>
           <span data-testid="tenant-label" className="hidden truncate sm:inline">

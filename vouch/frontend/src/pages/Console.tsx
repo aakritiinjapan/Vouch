@@ -2,9 +2,10 @@
  * The console — the one-decision screen. It answers exactly one question: do I trust this competitor
  * price enough to let it move my listing — yes / no / not yet?
  *
- * Presentational: all state and mutations live in useVouch (wired in App). Section order is not
- * fixed — when something is held, held decisions come FIRST; routine changes are what you do when
- * there is nothing to judge, so they never sit above the thing that needs judging.
+ * Presentational: all state and mutations live in useVouch (wired in App). Laid out as five regions
+ * separated by space and hairlines rather than nested boxed cards: ① header (identity · scope · demo)
+ * ② trust metrics ③ the decision / held (the hero region) ④ ready to apply ⑤ receipts (right rail).
+ * Section order is not fixed — when something is held, held decisions come FIRST.
  */
 
 import type { DemoHint, HealEvent, Product, Proposal } from "../types";
@@ -13,7 +14,7 @@ import { HeldCard } from "../components/HeldCard";
 import { SafeChangesPanel } from "../components/SafeChangesPanel";
 import { StatusRibbon } from "../components/StatusRibbon";
 import { TrustMetrics } from "../components/TrustMetrics";
-import { Button, Card, EmptyState } from "../components/ui/Bits";
+import { Button, EmptyState } from "../components/ui/Bits";
 
 export interface ConsoleProps {
   products: Product[];
@@ -60,10 +61,8 @@ export function Console(props: ConsoleProps) {
 
   const heldSection = (
     <section aria-label="Needs your decision">
-      <div className="mb-2 flex flex-wrap items-baseline gap-x-2 px-1">
-        <h2 className="text-[13px] font-bold uppercase tracking-wide text-ink">
-          Needs your decision
-        </h2>
+      <div className="mb-3 flex flex-wrap items-baseline gap-x-3">
+        <h2 className="font-display text-h2 font-semibold text-ink">Needs your decision</h2>
         <span className="text-xs text-ink-muted">
           {held.length === 0
             ? "nothing is being withheld"
@@ -71,14 +70,14 @@ export function Console(props: ConsoleProps) {
         </span>
       </div>
       {held.length === 0 ? (
-        <Card>
+        <div className="rounded-lg border border-hair bg-surface">
           <EmptyState
             title="Nothing to hold"
             body="Vouch holds a reprice whenever it can't stand behind the number behind it. Nothing is being withheld right now."
           />
-        </Card>
+        </div>
       ) : (
-        <div className="space-y-4">
+        <div className="space-y-5">
           {held.map((proposal) => (
             <HeldCard
               key={proposal.id}
@@ -108,27 +107,27 @@ export function Console(props: ConsoleProps) {
   );
 
   return (
-    <div className="mx-auto max-w-[1280px] px-5 py-6">
-      {/* identity + purpose */}
-      <div className="mb-4">
-        <h1 className="font-display text-2xl font-semibold tracking-tight text-ink">Pricing desk</h1>
-        <p className="mt-1 text-sm text-ink-secondary text-pretty">
-          We move your price only on competitor data we can prove is real.
-        </p>
-      </div>
-
-      {/* scope */}
-      <div className="mb-4 flex flex-wrap items-center gap-x-2 rounded-xl border border-hair bg-surface px-4 py-2.5 text-sm shadow-card">
-        <span className="eyebrow">Checking against</span>
-        <span className="font-semibold text-ink">Newegg</span>
-        <span className="text-ink-muted">·</span>
-        <span className="num text-ink-secondary">{products.length} products</span>
+    <div className="mx-auto max-w-[1200px] px-6 py-8">
+      {/* ① identity + purpose + scope */}
+      <div className="flex flex-wrap items-end justify-between gap-x-6 gap-y-3">
+        <div>
+          <h1 className="font-display text-title font-bold text-ink">Pricing desk</h1>
+          <p className="mt-1.5 max-w-xl text-ink-secondary text-pretty">
+            We move your price only on competitor data we can prove is real.
+          </p>
+        </div>
+        <div className="flex items-center gap-2 text-sm">
+          <span className="eyebrow">Checking against</span>
+          <span className="font-semibold text-ink">Newegg</span>
+          <span className="text-ink-muted">·</span>
+          <span className="num text-ink-secondary">{products.length} products</span>
+        </div>
       </div>
 
       {/* demo strip */}
       {mockMode && (
-        <div className="mb-4 rounded-xl border border-dashed border-axis bg-raised/40 px-4 py-3">
-          <p className="eyebrow mb-2">▶ Demo — simulate real scraping events</p>
+        <div className="mt-5 rounded-lg border border-dashed border-hairStrong bg-white/[0.02] px-4 py-3.5">
+          <p className="eyebrow mb-2.5 text-brand-soft">▶ Demo — simulate real scraping events</p>
           <div className="flex flex-wrap items-center gap-2">
             <Button variant="primary" onClick={onRunCycle} busy={busy === "run-cycle"}>
               Check competitors now
@@ -162,14 +161,18 @@ export function Console(props: ConsoleProps) {
       <div
         className={busy ? "pointer-events-none opacity-60 transition-opacity" : "transition-opacity"}
       >
-        <StatusRibbon held={held} pending={pending} products={products} />
+        <div className="mt-6">
+          <StatusRibbon held={held} pending={pending} products={products} />
+        </div>
 
-        <div className="mt-4">
+        {/* ② trust metrics */}
+        <div className="mt-6">
           <TrustMetrics products={products} held={held} />
         </div>
 
-        <div className="mt-5 grid grid-cols-1 gap-5 lg:grid-cols-[minmax(0,1fr)_400px]">
-          <div className="space-y-5">
+        {/* ③④ decision + ready · ⑤ receipts */}
+        <div className="mt-8 grid grid-cols-1 gap-x-10 gap-y-8 lg:grid-cols-[minmax(0,1fr)_380px]">
+          <div className="space-y-8">
             {held.length > 0 ? (
               <>
                 {heldSection}
@@ -183,7 +186,9 @@ export function Console(props: ConsoleProps) {
             )}
           </div>
 
-          <Receipts events={healEvents} />
+          <div className="lg:border-l lg:border-hair lg:pl-10">
+            <Receipts events={healEvents} />
+          </div>
         </div>
       </div>
     </div>

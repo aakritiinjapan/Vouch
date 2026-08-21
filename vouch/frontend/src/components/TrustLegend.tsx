@@ -8,17 +8,16 @@ import { useState } from "react";
 import { BAND_LEGEND } from "../verdict";
 
 const DOT: Record<string, string> = {
-  high: "bg-status-good",
-  med: "bg-status-warning",
-  low: "bg-status-critical",
+  high: "bg-verified",
+  med: "bg-watch",
+  low: "bg-held",
 };
 
-export function TrustLegend({ dark = false }: { dark?: boolean }) {
+export function TrustLegend() {
   const [open, setOpen] = useState(false);
-  const muted = dark ? "text-navy-muted" : "text-ink-muted";
 
   return (
-    <div className={`text-[11px] ${muted}`}>
+    <div className="text-[11px] text-ink-muted">
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
         <span className="eyebrow">Trust</span>
         {BAND_LEGEND.map((b) => (
@@ -32,9 +31,7 @@ export function TrustLegend({ dark = false }: { dark?: boolean }) {
           aria-label="What the trust score means"
           aria-expanded={open}
           onClick={() => setOpen((o) => !o)}
-          className={`grid size-4 place-items-center rounded-full border ${
-            dark ? "border-navy-hair" : "border-hair"
-          } text-[9px] hover:text-ink`}
+          className="grid size-4 place-items-center rounded-full border border-hair text-[9px] hover:text-ink"
         >
           ⓘ
         </button>
@@ -43,7 +40,7 @@ export function TrustLegend({ dark = false }: { dark?: boolean }) {
         <dl className="mt-2 space-y-1">
           {BAND_LEGEND.map((b) => (
             <div key={b.key} className="flex gap-2">
-              <dt className="w-24 shrink-0 font-medium">
+              <dt className="w-24 shrink-0 font-medium text-ink-secondary">
                 {b.label} <span className="font-mono">{b.range}</span>
               </dt>
               <dd>{b.meaning}</dd>
