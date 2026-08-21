@@ -1,0 +1,20 @@
+#!/bin/sh
+# Block direct pushes to main; everything lands via PR (see CLAUDE.md).
+# Override a genuine exception with ALLOW_PUSH_TO_MAIN=1.
+
+if [ "${ALLOW_PUSH_TO_MAIN:-0}" = "1" ]; then
+  exit 0
+fi
+
+protected="main"
+while read -r _local_ref _local_sha remote_ref _remote_sha; do
+  case "$remote_ref" in
+    refs/heads/"$protected")
+      echo "pre-push: direct pushes to '$protected' are blocked. Open a PR." >&2
+      echo "Override a genuine exception with ALLOW_PUSH_TO_MAIN=1." >&2
+      exit 1
+      ;;
+  esac
+done
+
+exit 0

@@ -23,3 +23,5 @@ dist/
 
 .demo-api.log
 .demo-ui.log
+CLAUDE.md
+scratchpad/

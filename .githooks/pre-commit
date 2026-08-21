@@ -1,0 +1,20 @@
+#!/bin/sh
+# Enforce this repo's canonical commit identity (see CLAUDE.md).
+#
+# Commit authorship on this repo silently defaulted to the wrong identity once
+# (an inherited local config), so this guard refuses any commit not authored as
+# the expected person. Fix the identity rather than bypassing it.
+
+EXPECTED_NAME="DeepakReddyVelagala"
+EXPECTED_EMAIL="vksdeepakreddy@gmail.com"
+
+ident=$(git var GIT_AUTHOR_IDENT)
+name=$(printf '%s' "$ident" | sed 's/ <.*//')
+email=$(printf '%s' "$ident" | sed -e 's/.*<//' -e 's/>.*//')
+
+if [ "$name" != "$EXPECTED_NAME" ] || [ "$email" != "$EXPECTED_EMAIL" ]; then
+  echo "pre-commit: refusing to commit as '$name <$email>'." >&2
+  echo "This repo requires $EXPECTED_NAME <$EXPECTED_EMAIL> (see CLAUDE.md)." >&2
+  echo "Fix: git config user.name \"$EXPECTED_NAME\" && git config user.email \"$EXPECTED_EMAIL\"" >&2
+  exit 1
+fi

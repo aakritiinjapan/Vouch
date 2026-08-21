@@ -2,99 +2,117 @@
 
 Three minutes, not five. Judges watch a lot of these, and the arc lands harder tight.
 
-The order matters more than anything else here: **prove the collector is real in the first 45
-seconds, then let the product tell the story.** Leading with the dashboard invites the question "is
-any of this actually Bright Data?" and you spend the rest of the video answering it.
+The arc follows the product: **the verdict is the product; the repricer is where it obviously
+matters.** So we open on the verdict idea, immediately prove the data underneath it is real, show
+the guardian catch a silent lie, and then reveal the verdict as a standalone thing anything can
+call. See [PRODUCT.md](../../PRODUCT.md) for positioning and [AS-IS.md](../../AS-IS.md) for what is
+actually built (so no claim here outruns the code).
 
 Two windows: a terminal with real CLI output (captured in advance — see
-[`LIVE_CAPTURE.md`](LIVE_CAPTURE.md)) and the console at `http://127.0.0.1:5173`.
+[`LIVE_CAPTURE.md`](LIVE_CAPTURE.md)) and the app at `http://127.0.0.1:5173` (Hero → Console →
+Trust API views).
+
+> UI element names below track [UI_PLAN.md](../../UI_PLAN.md). Give the script one final pass once
+> the redesign lands, in case a label moved.
 
 ---
 
 ## The arc
 
-> A real collector → a real heal stopping at the approval gate → the guardian catching a heal that
-> would have repriced a $6,900 card to $19.99 → the re-prompt that fixes it.
+> The verdict is the product → the collector under it is real → a real heal stops at the approval
+> gate → the guardian catches a heal that would reprice a $6,900 card to $19.99 → the same verdict,
+> live, as an API anything can call.
 
 ---
 
-## 0:00 — The product, on real data (20s)
+## 0:00 — The verdict, framed (15s)
 
-Console already loaded, in the confirmed state. Nothing held.
+Open on the **Hero**. Headline on screen: *"Never act on a number you can't verify."*
 
-> "This is a repricer. It watches competitor prices and proposes changes — but only off data it can
-> vouch for. The competitor data comes from a Scraper Studio collector I built from the CLI."
+> "Self-healing scrapers fix themselves when a site changes — and sometimes fix themselves into
+> reading the wrong number, silently. Vouch returns a verdict on every scrape before anything acts
+> on it. Its first job: making sure a broken competitor scrape never moves your price."
 
-The collector id sits under the title. Let it be visible.
+Don't linger. The hero states the thesis; the terminal proves it.
 
-## 0:20 — The collector is real (25s)
+## 0:15 — The collector is real (25s)
 
 Cut to the terminal. Real `scraper run` output scrolling — 96 graphics cards, names, prices,
 shipping, stock.
 
-> "Ninety-six cards off Newegg's public category page, one request."
+> "Ninety-six cards off Newegg's public category page, one request — a DataVerse Scraper Studio collector we
+> built."
 
-## 0:45 — The heal stops at the gate (30s) — the most important beat
+## 0:40 — The heal stops at the gate (30s) — the most important beat
 
 Still in the terminal. Real `scraper heal`. It pauses at `awaiting_approval` and hands back
 `preview_result`.
 
-> "Scraper Studio heals itself when a page changes. Without `--auto-approve` it stops here and hands
-> you `preview_result` — the rows the fix *would* produce. Scraper Studio's own approval screen shows
-> you a code diff. The CLI gives you the data. That gap is where this whole product lives."
+> "When a page changes, Scraper Studio heals itself. Without `--auto-approve` it stops *here* and
+> hands back `preview_result` — the rows the fix *would* produce. Its own approval screen shows you a
+> code diff; the CLI gives you the data. That gap is where this whole product lives."
 
 Nobody else in this hackathon will have found this. Do not rush it.
 
-## 1:15 — The catch (60s) — the heart of it
+## 1:10 — The catch (55s) — the heart of it
 
-Back to the console. Click **Replay: shipping swap**.
+Back to the app, on the **Console**. In the DEMO strip, click **Replay: shipping swap**.
 
 Say the honest thing once, early, then move on:
 
-> "This particular failure is a captured scenario replayed offline — I can't make Newegg redesign on
+> "This particular failure is a captured scenario replayed offline — we can't make Newegg redesign on
 > cue. The data is their real data; the guardian running on it is the real guardian."
 
-Three held cards appear. Read the top one:
+A held decision appears with its **Verdict Seal**. Read it:
 
 ```
-⏸  Reprice held · COLUMN_SWAP
-    ZOTAC ARCTICSTORM AIO GeForce RTX 5090 32GB
+   MSI RTX 5090 · vs Newegg
+   Our price        $6,900.00
+   Competitor price ⚠ couldn't verify — came back $19.99 (the shipping cost)
 
-    −$951.00     per unit of margin, on every one sold, had we auto-approved
-
-    The healed price ($19.99) matches this competitor's SHIPPING column, not their item price.
-    40 / 100  ✕ failed   ·   source: www.newegg.com · unconfirmed
+   ╭ VERDICT · ✕ FAIL · trust 40/100 (Low) ╮
+   the scraper mixed up two columns — read SHIPPING as the price
 ```
 
-> "The heal worked. Right rows, right format, right types — and it silently started reading the
-> shipping column. Newegg lists this card at six thousand nine hundred dollars with nineteen
-> ninety-nine shipping. A repricer acting on that number matches a competitor that doesn't exist."
+> "The heal worked — right rows, right shape, right types — and it silently started reading the
+> shipping column. Newegg lists this card at sixty-nine hundred dollars with $19.99 shipping. A
+> repricer acting on that number matches a competitor that doesn't exist."
 
-Click **Show the damage** on the top card.
+Click **Show the damage**.
 
-> "Our floor rule would have clamped us to $6,048 rather than following it all the way down — margin
-> twenty percent to seven. Without a floor you go to $19.98. A floor caps the disaster; only checking
-> the number prevents it. And notice the chart refuses to draw a line across the cycle it couldn't
-> verify — that's a hole in the data, not a guess."
+> "Our floor rule would have clamped us to $6,048 rather than following it down — margin twenty
+> percent to seven. Without a floor you go to $19.98. A floor caps the disaster; only checking the
+> number prevents it. And the chart refuses to draw a line across the cycle it couldn't verify —
+> that's a hole in the data, not a guess."
 
-## 2:15 — The re-prompt (30s) — do not cut this
+## 2:05 — The re-prompt (20s) — quick, don't cut it
 
-Click **Investigate** on the same card, then **Re-prompt & resume**.
+Click **Investigate**, then **Re-prompt & resume**.
 
-> "Here's the guardian's working — the proposed median was zero, against a historical median of eight
-> hundred and ten. And this is the instruction it wrote back to Scraper Studio from those numbers.
-> The validator writes the scraper's next prompt."
+> "Here's the guardian's working — proposed median zero against a historical eight hundred and ten —
+> and the instruction it wrote back to Scraper Studio from those numbers. The validator writes the
+> scraper's next prompt."
 
-The second heal passes, the holds clear as superseded, and normal proposals appear.
+The second heal passes, the hold clears, a real proposal appears.
 
-> "Sharper prompt, re-validated, confidence 100. Now it's a change the seller can act on."
+> "Sharper prompt, re-validated, confidence 100 — now it's a change the seller can act on."
 
-## 2:45 — Close (15s)
+## 2:25 — The reframe (25s) — the new heart
+
+On the held card, click **`view as API →`**. It opens the **Trust API** view on the same row.
+
+> "Everything you just saw hangs on one thing — this verdict. And it isn't buried in the repricer.
+> It's a standalone call. Same rows, live —" (the response renders) "— `POST /verify`: decision
+> fail, confidence forty, and the reason. This part is not replayed; that's the real endpoint.
+> The repricer is just one consumer of this verdict. A pricing pipeline, an inventory system, an AI
+> agent — anything that acts on scraped data can gate on it. That's the product."
+
+## 2:50 — Close + what's next (10s)
 
 > "Scraper Studio keeps the data flowing when a site changes. Vouch makes sure it didn't quietly
-> start lying — inside a product where trusting the number is the whole job."
+> start lying — a trust layer for any scraped-data pipeline. Repricing today; branded catalogs next."
 
-End with the collector id on screen.
+End on the Verdict Seal, or the collector id.
 
 ---
 
@@ -102,10 +120,11 @@ End with the collector id on screen.
 
 - **Never show a replay button before you have shown real CLI output.** Order is the whole
   credibility argument.
-- **Say "replayed" once, early, plainly.** Pre-empting costs nothing; being caught costs the track.
+- **Say "replayed" once, early, plainly** — for the *heal*. Then note the **`/verify` beat is live**;
+  the contrast helps, not hurts.
 - **Don't say "we studied what wins hackathons."** Not in the video, not in Q&A.
-- **Rehearse twice on the machine you'll record on.** `./demo.sh --reset` returns the console to the
-  opening state between takes.
+- **Rehearse twice on the machine you'll record on.** `./demo.sh --reset` returns the app to the
+  opening state between takes. Run the main catch with the live-derived dataset (the $6,900 card).
 
 ## The optional beat (Q&A, or if you have 30s spare)
 
@@ -113,11 +132,11 @@ Against the hand-written dataset (`DEMO_DATASET=sample_runs`) there is a fourth 
 crossed-out price**. The heal reads the struck-through original instead of the sale price — only
 ~14% off.
 
-> "This is the one a distribution check cannot catch. Fourteen percent is a plausible price move, so
-> nothing statistical fires. What catches it is an invariant: a sale price can never be higher than
-> the price it's discounted from. And the harm flips — here we'd price *above* the market and lose
-> the sale, not undercut ourselves. No floor rule helps in that direction."
+> "This is the one a distribution check cannot catch. Fourteen percent is a plausible move, so
+> nothing statistical fires. What catches it is an invariant: a sale price can never exceed the price
+> it's discounted from. And the harm flips — here we'd price *above* the market and lose the sale,
+> not undercut ourselves. No floor rule helps in that direction."
 
 It is absent from the live-derived dataset on purpose: the real collector never captured
-`original_price`, so the console does not offer a control its data cannot honour. That is worth
-saying out loud if anyone asks — it is the same honesty the product is built on.
+`original_price`, so the console does not offer a control its data cannot honour. That is the same
+honesty the product is built on — worth saying if anyone asks.
