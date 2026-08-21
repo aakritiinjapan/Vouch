@@ -171,6 +171,60 @@ def test_empty_candidate_records_is_422(client, runs):
 
 
 # --------------------------------------------------------------------------------------
+# malformed input is a 422, never a 500 (this endpoint ingests arbitrary caller data)
+# --------------------------------------------------------------------------------------
+
+@pytest.mark.parametrize("bad", [{}, {"foo": 1}])
+def test_malformed_baseline_profiles_is_422(client, runs, bad):
+    status, payload = _verify(client, candidate_records=runs["baseline"],
+                              baseline_profiles={"price": bad})
+    assert status == 422, payload
+
+
+# --------------------------------------------------------------------------------------
+# payload size is bounded
+# --------------------------------------------------------------------------------------
+
+def test_oversized_candidate_records_is_422(client, runs):
+    from app.api.routes import MAX_VERIFY_ROWS
+    huge = [dict(runs["baseline"][0]) for _ in range(MAX_VERIFY_ROWS + 1)]
+    status, payload = _verify(client, candidate_records=huge, baseline_records=runs["baseline"])
+    assert status == 422, payload
+
+
+def test_oversized_baseline_records_is_422(client, runs):
+    from app.api.routes import MAX_VERIFY_ROWS
+    huge = [dict(runs["baseline"][0]) for _ in range(MAX_VERIFY_ROWS + 1)]
+    status, payload = _verify(client, candidate_records=runs["baseline"], baseline_records=huge)
+    assert status == 422, payload
+
+
+# --------------------------------------------------------------------------------------
+# baseline_profiles path still runs ROW_COUNT_SHIFT via inferred count
+# --------------------------------------------------------------------------------------
+
+def test_profiles_path_infers_count_and_runs_row_count_shift(client, runs):
+    # A 1-row candidate against the 8-row baseline should trip ROW_COUNT_SHIFT even when the caller
+    # supplies profiles (not raw records) and omits baseline_count - the count is inferred from the
+    # profiles, not silently defaulted to 0 (which would no-op the check).
+    profiles, _ = baseline_capture.capture(runs["baseline"])
+    one_row = [runs["baseline"][0]]
+    status, payload = _verify(client, candidate_records=one_row, baseline_profiles=profiles)
+    assert status == 200, payload
+    assert "ROW_COUNT_SHIFT" in _codes(payload)
+
+
+# --------------------------------------------------------------------------------------
+# the public contract rejects unknown knobs rather than silently ignoring them
+# --------------------------------------------------------------------------------------
+
+def test_unknown_field_is_422(client, runs):
+    status, _ = _verify(client, candidate_records=runs["baseline"],
+                        baseline_records=runs["baseline"], use_jugde=True)
+    assert status == 422
+
+
+# --------------------------------------------------------------------------------------
 # the judge, off in mock
 # --------------------------------------------------------------------------------------
 
