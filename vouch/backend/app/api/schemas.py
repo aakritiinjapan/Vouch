@@ -355,6 +355,44 @@ class HistoryOut(BaseModel):
 
 
 # --------------------------------------------------------------------------------------
+# trust layer - the stateless /verify surface
+# --------------------------------------------------------------------------------------
+
+class VerifyRequest(BaseModel):
+    """A caller hands us the rows to judge and a reference to judge them against.
+
+    The reference comes one of two ways, and exactly one must be given (validated in the route):
+    `baseline_records` are raw last-known-good rows we profile server-side, and `baseline_profiles`
+    are profiles the caller already computed (e.g. read off a stored Baseline). Everything else is
+    optional and mirrors the knobs the internal guardian already exposes.
+    """
+    candidate_records: list[dict]                          # REQUIRED, non-empty - the rows to judge
+    baseline_records: Optional[list[dict]] = None          # raw reference rows, profiled here
+    baseline_profiles: Optional[dict[str, dict]] = None    # precomputed serialized FieldProfiles
+    baseline_count: Optional[int] = None                   # inferred from baseline_records if omitted
+    is_sample: bool = False                                 # candidate is a preview - suppress volume
+    use_judge: bool = False                                 # allow Tier 3 (no-op in mock / no key)
+
+
+class VerifyFailure(BaseModel):
+    """One failed check, flattened from a guardian CheckResult for the wire."""
+    code: str
+    severity: str
+    field: str
+    message: str
+    evidence: dict
+
+
+class VerifyResponse(BaseModel):
+    decision: str                 # pass | review | fail
+    confirmed: bool               # decision == pass
+    confidence: int               # 0-100
+    brief: str
+    failures: list[VerifyFailure]
+    judge_consulted: bool
+
+
+# --------------------------------------------------------------------------------------
 # demo capabilities
 # --------------------------------------------------------------------------------------
 

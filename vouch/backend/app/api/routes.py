@@ -19,6 +19,9 @@ from app import service
 from app.api import schemas
 from app.config import settings
 from app.db import session_dep
+from app.guardian import judge as guardian_judge
+from app.guardian.checks import FieldProfile, run_all_checks
+from app.guardian.verdict import REVIEW, apply_judge, decide
 from app.models import (
     Baseline,
     CompetitorObservation,
@@ -87,6 +90,66 @@ _DATASET_NOTES = {
 def _fail(err: service.ServiceError):
     raise HTTPException(status_code=err.status_code,
                         detail={"detail": err.message, **err.detail})
+
+
+# --------------------------------------------------------------------------------------
+# trust layer - the stateless verdict primitive
+# --------------------------------------------------------------------------------------
+
+@router.post("/verify", response_model=schemas.VerifyResponse)
+def verify(body: schemas.VerifyRequest = Body(...)):
+    """Run the guardian over caller-supplied rows and return the raw verdict - nothing else.
+
+    This is the trust layer laid bare: no product, no baseline row, no pricing, no writes. It is the
+    same pure pipeline the orchestrator runs internally (run_all_checks -> decide -> apply_judge),
+    exposed so any pipeline can gate on Vouch's confidence score and risk brief without adopting the
+    repricer. Because it touches no database it takes no session dependency.
+    """
+    if not body.candidate_records:
+        raise HTTPException(422, detail={"detail": "candidate_records must be non-empty"})
+
+    has_records = body.baseline_records is not None
+    has_profiles = body.baseline_profiles is not None
+    if has_records == has_profiles:
+        raise HTTPException(422, detail={
+            "detail": "provide exactly one of baseline_records or baseline_profiles"})
+
+    # Build the baseline profiles the checks compare against, from whichever shape was given.
+    if has_records:
+        serialized, inferred_count = baseline_capture.capture(body.baseline_records)
+        baseline_count = body.baseline_count if body.baseline_count is not None else inferred_count
+    else:
+        serialized = body.baseline_profiles
+        baseline_count = body.baseline_count if body.baseline_count is not None else 0
+    baseline_profiles = {name: FieldProfile.from_dict(prof) for name, prof in serialized.items()}
+
+    results = run_all_checks(baseline_profiles, body.candidate_records, baseline_count,
+                             is_sample=body.is_sample)
+    verdict = decide(results)
+
+    judge_consulted = False
+    if body.use_judge and verdict.decision == REVIEW:
+        judge_result = guardian_judge.judge_fields(body.candidate_records)
+        verdict = apply_judge(verdict, judge_result)
+        judge_consulted = judge_result.consulted
+
+    return schemas.VerifyResponse(
+        decision=verdict.decision,
+        confirmed=verdict.confirmed,
+        confidence=verdict.confidence,
+        brief=verdict.brief,
+        failures=[
+            schemas.VerifyFailure(
+                code=f.code,
+                severity=f.severity.value,
+                field=f.field_name,
+                message=f.message,
+                evidence=f.evidence,
+            )
+            for f in verdict.failures
+        ],
+        judge_consulted=judge_consulted,
+    )
 
 
 # --------------------------------------------------------------------------------------
