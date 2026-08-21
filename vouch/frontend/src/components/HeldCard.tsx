@@ -211,26 +211,68 @@ export function HeldCard({
   onApproveAnyway,
   onSkip,
   onViewAsApi,
+  defaultExpanded = true,
 }: {
   proposal: Proposal;
   busy: string | null;
   onApproveAnyway: (id: number) => void;
   onSkip: (id: number) => void;
   onViewAsApi?: (proposal: Proposal) => void;
+  defaultExpanded?: boolean;
 }) {
   const [panel, setPanel] = useState<Panel>("none");
   const [confirming, setConfirming] = useState(false);
+  const [expanded, setExpanded] = useState(defaultExpanded);
   const cf = proposal.counterfactual;
   const applied = cf?.applied_price ?? null;
   const decision = toDecision(proposal.guardian?.verdict, proposal.confidence);
 
   const toggle = (next: Panel) => setPanel((current) => (current === next ? "none" : next));
 
-  return (
-    <article className="animate-reveal overflow-hidden rounded-lg border border-held/25 bg-surface shadow-held">
-      <div className="h-[3px] bg-held/80" />
+  // Restrained held treatment: a held-colour left accent bar + one hairline + subtle elevation —
+  // the state reads without three full cards engulfing the page like alarms.
+  const shell =
+    "animate-reveal overflow-hidden rounded-lg border border-hair border-l-[3px] border-l-held bg-surface shadow-soft";
 
-      <div className="px-6 pt-5">
+  // Collapsed: a compact summary row — name · gauge · exposure · chevron to expand in place.
+  if (!expanded) {
+    return (
+      <article className={shell}>
+        <button
+          type="button"
+          onClick={() => setExpanded(true)}
+          className="flex w-full items-center gap-4 px-5 py-3.5 text-left"
+          aria-expanded={false}
+        >
+          <VerdictGauge decision={decision} score={proposal.confidence} size={44} animate={false} />
+          <div className="min-w-0 flex-1">
+            <p className="truncate text-sm font-medium text-ink" title={proposal.product.name}>
+              {proposal.product.name}
+            </p>
+            <p className="mt-0.5 truncate text-xs text-ink-muted">
+              {proposal.guardian?.check_code ?? "held"} · couldn&rsquo;t verify · vs Newegg
+            </p>
+          </div>
+          {cf && (
+            <div className="hidden shrink-0 text-right sm:block">
+              <p className="eyebrow">If auto-applied</p>
+              <p className="num mt-0.5 text-sm font-bold text-held">
+                {signedMoney(cf.profit_delta_vs_now)}
+              </p>
+            </div>
+          )}
+          <span aria-hidden className="shrink-0 text-ink-muted">
+            ▸
+          </span>
+        </button>
+      </article>
+    );
+  }
+
+  return (
+    <article className={shell}>
+      <div className="flex items-start justify-between px-6 pt-5">
+        <div className="min-w-0">
         <div className="flex flex-wrap items-center gap-2">
           <h3 className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.12em] text-held">
             <span
@@ -241,9 +283,19 @@ export function HeldCard({
           </h3>
           {proposal.guardian?.check_code && <CheckBadge code={proposal.guardian.check_code} />}
         </div>
-        <p className="mt-2 truncate text-sm font-medium text-ink" title={proposal.product.name}>
-          {proposal.product.name} <span className="text-ink-muted">· vs Newegg</span>
-        </p>
+          <p className="mt-2 truncate text-sm font-medium text-ink" title={proposal.product.name}>
+            {proposal.product.name} <span className="text-ink-muted">· vs Newegg</span>
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={() => setExpanded(false)}
+          aria-expanded
+          aria-label="Collapse this decision"
+          className="ml-3 shrink-0 rounded-md px-1.5 text-ink-muted hover:text-ink"
+        >
+          ▾
+        </button>
       </div>
 
       {/* 1. price facts */}

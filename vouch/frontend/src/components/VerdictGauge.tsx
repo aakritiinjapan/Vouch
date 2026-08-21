@@ -61,10 +61,11 @@ export function VerdictGauge({
 }) {
   const clamped = Math.max(0, Math.min(100, Math.round(score)));
   const color = STATE_COLOR[decision];
-  const band = trustBand(clamped);
-  // Below ~72px the ticks and glyph become visual noise; keep only the score.
+  // Below ~72px the ticks and state word become visual noise; keep only the score.
   const compact = size < 72;
-  const stroke = compact ? 5 : 4;
+  // The track sits under the fill; the fill is a touch thicker so it reads clearly on top of it.
+  const track = compact ? 5 : 4.5;
+  const fill = compact ? 6 : 5.5;
 
   const trackPath = arcPath(R, START_DEG, START_DEG + SWEEP_DEG);
   const valuePath = arcPath(R, START_DEG, valueAngle(clamped));
@@ -85,12 +86,12 @@ export function VerdictGauge({
           </linearGradient>
         </defs>
 
-        {/* hairline track ring */}
+        {/* hairline track ring — clearly visible around the full 270° sweep */}
         <path
           d={trackPath}
           fill="none"
-          stroke="rgba(255,255,255,0.10)"
-          strokeWidth={stroke}
+          stroke="rgba(255,255,255,0.16)"
+          strokeWidth={track}
           strokeLinecap="round"
         />
 
@@ -98,8 +99,8 @@ export function VerdictGauge({
         {!compact &&
           THRESHOLDS.map((t) => {
             const deg = valueAngle(t);
-            const inner = polar(R - stroke / 2 - 2.5, deg);
-            const outer = polar(R + stroke / 2 + 2.5, deg);
+            const inner = polar(R - fill / 2 - 2.5, deg);
+            const outer = polar(R + fill / 2 + 2.5, deg);
             const reached = clamped >= t;
             return (
               <line
@@ -115,13 +116,13 @@ export function VerdictGauge({
             );
           })}
 
-        {/* the score arc, 0 → score, in the state colour, drawing in on mount */}
+        {/* the score arc, 0 → score, in the state colour, drawn thick ON TOP of the track */}
         {clamped > 0 && (
           <path
             d={valuePath}
             fill="none"
             stroke={color}
-            strokeWidth={stroke}
+            strokeWidth={fill}
             strokeLinecap="round"
             pathLength={100}
             strokeDasharray={100}
@@ -137,29 +138,22 @@ export function VerdictGauge({
         )}
       </svg>
 
-      {/* center face: tabular-mono score, and (above compact) a small PASS/FAIL glyph */}
+      {/* center face: exactly two things — the dominant score, and (above compact) the state word.
+          At compact (chip/receipt) sizes only the score is shown. */}
       <div className="absolute inset-0 grid place-items-center text-center leading-none">
         <div>
           <div
             className="num font-bold text-ink"
-            style={{ fontSize: compact ? size * 0.38 : size * 0.3, lineHeight: 1 }}
+            style={{ fontSize: compact ? size * 0.4 : size * 0.34, lineHeight: 1 }}
           >
             {clamped}
           </div>
           {!compact && (
             <div
-              className="mt-1 font-mono font-bold uppercase tracking-[0.14em]"
+              className="mt-1.5 font-mono font-bold uppercase tracking-[0.16em]"
               style={{ color, fontSize: size * 0.1 }}
             >
               <span aria-hidden>{decisionGlyph[decision]}</span> {decisionLabel[decision]}
-            </div>
-          )}
-          {!compact && (
-            <div
-              className="mt-0.5 font-mono uppercase tracking-[0.12em] text-ink-muted"
-              style={{ fontSize: size * 0.075 }}
-            >
-              {band.label} · /100
             </div>
           )}
         </div>

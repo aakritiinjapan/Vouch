@@ -77,12 +77,13 @@ export function Console(props: ConsoleProps) {
           />
         </div>
       ) : (
-        <div className="space-y-5">
-          {held.map((proposal) => (
+        <div className="space-y-3">
+          {held.map((proposal, i) => (
             <HeldCard
               key={proposal.id}
               proposal={proposal}
               busy={busy}
+              defaultExpanded={i === 0}
               onApproveAnyway={(id) => onApprove(id)}
               onSkip={(id) => onReject(id)}
               onViewAsApi={onViewAsApi}

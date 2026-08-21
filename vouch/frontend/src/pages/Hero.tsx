@@ -10,7 +10,7 @@
  */
 
 import type { Navigate } from "../hooks/useRoute";
-import { VerdictChip, VerdictGauge } from "../components/VerdictGauge";
+import { VerdictGauge } from "../components/VerdictGauge";
 import { Wordmark } from "../components/Wordmark";
 
 function ContrastRow({ ok, children }: { ok: boolean; children: React.ReactNode }) {
@@ -81,10 +81,9 @@ export function Hero({ navigate }: { navigate: Navigate }) {
         {/* contrast proof — one region, split by a hairline, not two boxes */}
         <section className="mt-20 animate-reveal rounded-lg border border-hair bg-surface p-7 shadow-soft sm:p-9">
           <p className="max-w-3xl text-sm text-ink-secondary text-pretty">
-            The competitor page changed. Your scraper &ldquo;self-healed&rdquo;
+            The competitor page changed, and your scraper &ldquo;self-healed&rdquo; by{" "}
             <span className="text-ink">
-              {" "}
-              … and started reading the $19.99 SHIPPING cost as the product price.
+              quietly reading the $19.99 SHIPPING cost as the product price.
             </span>
           </p>
           <div className="mt-7 grid gap-8 sm:grid-cols-2">
@@ -107,8 +106,8 @@ export function Hero({ navigate }: { navigate: Navigate }) {
           </div>
         </section>
 
-        {/* the verdict is the product */}
-        <section className="mt-28 grid items-center gap-10 sm:grid-cols-[1fr_auto]">
+        {/* the verdict is the product — the large gauge is the single hero object here */}
+        <section className="mt-20 grid items-center gap-10 sm:grid-cols-[1fr_auto]">
           <div>
             <p className="eyebrow">The through-line</p>
             <h2 className="mt-3 font-display text-title font-bold text-ink">
@@ -118,17 +117,13 @@ export function Hero({ navigate }: { navigate: Navigate }) {
               Every scrape returns one portable verdict. The repricer is just its first consumer —
               send rows, get back trust.
             </p>
-            <div className="mt-6 max-w-md">
-              <VerdictChip
-                decision="fail"
-                score={40}
-                line="scraper mixed up two columns"
-                onViewAsApi={() => navigate("trust-api", { scenario: "column-swap" })}
-              />
-            </div>
+            <p className="mt-5 flex flex-wrap items-center gap-x-2 text-sm">
+              <span className="font-semibold text-held">✕ FAIL</span>
+              <span className="text-ink-muted">· trust 40/100 (Low) · scraper mixed up two columns</span>
+            </p>
             <button
               type="button"
-              onClick={() => navigate("trust-api")}
+              onClick={() => navigate("trust-api", { scenario: "column-swap" })}
               className="mt-6 rounded-full border border-hairStrong px-5 py-2.5 text-sm font-semibold text-ink transition-colors hover:bg-white/[0.05]"
             >
               Try the Trust API →
@@ -140,7 +135,7 @@ export function Hero({ navigate }: { navigate: Navigate }) {
         </section>
 
         {/* teaser / provenance */}
-        <footer className="mt-28 border-t border-hair py-10 text-sm text-ink-muted">
+        <footer className="mt-20 border-t border-hair py-10 text-sm text-ink-muted">
           <p>
             Powered by <span className="text-ink-secondary">◇ Bright Data</span> self-healing
             scrapers · <span className="text-ink-secondary">Anthropic</span> guardian

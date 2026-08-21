@@ -71,6 +71,16 @@ export function SafeChangesPanel({
 }) {
   const safeCount = proposals.filter((p) => p.is_safe).length;
 
+  // Nothing routine to review: a slim one-line note rather than a tall empty card.
+  if (!loading && proposals.length === 0) {
+    return (
+      <p className="border-t border-hair pt-4 text-sm text-ink-muted text-pretty">
+        <span className="font-medium text-ink-secondary">Ready to apply</span> — Nothing routine to
+        review; every confirmed source is already priced where Vouch would put it.
+      </p>
+    );
+  }
+
   return (
     <Card>
       <SectionHeader

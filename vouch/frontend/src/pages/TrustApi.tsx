@@ -195,7 +195,7 @@ export function TrustApi({
                 {error} — is the backend running on :8000?
               </p>
             ) : (
-              <pre className="scroll-slim max-h-[22rem] overflow-auto rounded-md border border-hair bg-canvas p-4 font-mono text-[11px] leading-relaxed text-ink-secondary">
+              <pre className="scroll-slim max-h-[24rem] overflow-y-auto whitespace-pre-wrap break-words rounded-md border border-hair bg-canvas p-4 font-mono text-[11px] leading-relaxed text-ink-secondary">
                 <code>{response ? JSON.stringify(response, null, 2) : "Running…"}</code>
               </pre>
             )}
