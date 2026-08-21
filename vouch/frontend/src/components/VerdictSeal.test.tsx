@@ -20,6 +20,16 @@ describe("VerdictSeal", () => {
     expect(seal.getAttribute("aria-label")).toMatch(/low/i);
     expect(screen.getByText("40")).toBeInTheDocument();
   });
+
+  it("hides the illegible microtext at small (chip/receipt) sizes but keeps the score and label", () => {
+    render(<VerdictSeal decision="fail" score={40} size={54} />);
+    // score glyph stays
+    expect(screen.getByText("40")).toBeInTheDocument();
+    // the inner FAIL/band microtext is dropped
+    expect(screen.queryByText("FAIL")).not.toBeInTheDocument();
+    // but the decision is still announced accessibly
+    expect(screen.getByRole("img", { name: /fail/i })).toBeInTheDocument();
+  });
 });
 
 describe("VerdictChip", () => {

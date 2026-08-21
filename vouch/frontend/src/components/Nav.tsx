@@ -14,7 +14,7 @@ const TABS: { view: View; label: string }[] = [
 export function Nav({ view, navigate }: { view: View; navigate: Navigate }) {
   return (
     <header className="sticky top-0 z-20 border-b border-hair bg-paper/85 backdrop-blur">
-      <div className="mx-auto flex max-w-[1280px] items-center gap-6 px-5 py-3">
+      <div className="mx-auto flex max-w-[1280px] flex-wrap items-center gap-x-6 gap-y-2 px-5 py-3">
         <button
           type="button"
           onClick={() => navigate("home")}
@@ -45,11 +45,13 @@ export function Nav({ view, navigate }: { view: View; navigate: Navigate }) {
           })}
         </nav>
 
-        <div className="ml-auto flex items-center gap-2 text-sm text-ink-secondary">
-          <span className="grid size-6 place-items-center rounded-md bg-holo-cta text-xs font-bold text-white">
+        <div className="ml-auto flex min-w-0 items-center gap-2 text-sm text-ink-secondary">
+          <span className="grid size-6 shrink-0 place-items-center rounded-md bg-holo-cta text-xs font-bold text-white">
             V
           </span>
-          Voltix Components
+          <span data-testid="tenant-label" className="hidden truncate sm:inline">
+            Voltix Components
+          </span>
         </div>
       </div>
     </header>

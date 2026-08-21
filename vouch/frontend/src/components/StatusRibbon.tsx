@@ -52,7 +52,7 @@ export function StatusRibbon({
 
   return (
     <div className="animate-rise overflow-hidden rounded-lg border border-status-critical/35 bg-status-critical/[0.07]">
-      <div className="h-[2px] origin-left animate-sweep bg-gradient-to-r from-status-critical to-transparent" />
+      <div className="h-[2px] bg-gradient-to-r from-status-critical to-transparent" />
       <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 px-4 py-3">
         <span
           className="size-1.5 animate-holdpulse rounded-full bg-status-critical"

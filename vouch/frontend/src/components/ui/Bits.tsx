@@ -48,7 +48,7 @@ export function SectionHeader({
 /** The machine tag, e.g. COLUMN_SWAP. Monospace on purpose: it reads as evidence, not decoration. */
 export function CheckBadge({ code }: { code: string }) {
   return (
-    <span className="rounded border border-status-critical/40 bg-status-critical/10 px-1.5 py-0.5 font-mono text-[11px] font-medium tracking-wide text-status-critical">
+    <span className="rounded border border-status-critical/40 bg-status-critical/10 px-1.5 py-0.5 font-mono text-[11px] font-medium tracking-wide text-status-criticalInk">
       {code}
     </span>
   );
@@ -65,7 +65,7 @@ export function Badge({
     neutral: "bg-raised text-ink-secondary",
     good: "bg-status-good/15 text-status-good",
     warning: "bg-status-warning/15 text-status-warning",
-    critical: "bg-status-critical/15 text-status-critical",
+    critical: "bg-status-critical/15 text-status-criticalInk",
   };
   return (
     <span className={`rounded px-1.5 py-0.5 text-[11px] font-medium ${tones[tone]}`}>
@@ -95,7 +95,7 @@ export function Button({
     secondary: "bg-surface text-ink border border-hair hover:border-axis hover:bg-raised",
     ghost: "text-ink-secondary hover:text-ink hover:bg-raised",
     danger:
-      "bg-transparent text-status-critical border border-status-critical/50 hover:bg-status-critical/10",
+      "bg-transparent text-status-criticalInk border border-status-critical/50 hover:bg-status-critical/10",
   };
   return (
     <button

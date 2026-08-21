@@ -6,16 +6,20 @@ import { TrustApi } from "./TrustApi";
 import { api } from "../api";
 
 vi.mock("../api", () => ({
+  ApiError: class ApiError extends Error {},
   api: {
     verify: vi.fn().mockResolvedValue({
-      decision: "fail",
-      confirmed: false,
-      confidence: 40,
-      brief: "'price' matches the distribution of 'shipping'.",
-      failures: [
-        { code: "COLUMN_SWAP", severity: "critical", field: "price", message: "swapped", evidence: {} },
-      ],
-      judge_consulted: false,
+      status: 200,
+      data: {
+        decision: "fail",
+        confirmed: false,
+        confidence: 40,
+        brief: "'price' matches the distribution of 'shipping'.",
+        failures: [
+          { code: "COLUMN_SWAP", severity: "critical", field: "price", message: "swapped", evidence: {} },
+        ],
+        judge_consulted: false,
+      },
     }),
   },
 }));
@@ -33,6 +37,8 @@ describe("TrustApi", () => {
 
     expect((await screen.findAllByText(/COLUMN_SWAP/)).length).toBeGreaterThan(0);
     expect(screen.getByRole("img", { name: /fail/i })).toBeInTheDocument();
+    // the real HTTP status is shown, not a hardcoded literal
+    expect(screen.getByText("200")).toBeInTheDocument();
   });
 
   it("re-runs verify when the scenario changes", async () => {

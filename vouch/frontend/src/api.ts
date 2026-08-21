@@ -92,12 +92,36 @@ export const api = {
   /**
    * The trust layer laid bare: run the guardian over caller-supplied rows and get back the raw
    * verdict — no product, no repricing, no writes. This is the "any pipeline can plug in" surface.
+   *
+   * Returns the real HTTP status alongside the body so the Trust API view can display the actual
+   * `200 · 41ms` line rather than a hardcoded literal. Non-2xx still throws an ApiError (carrying
+   * its own `.status`), matching every other method here.
    */
-  verify: (body: VerifyRequest) =>
-    request<VerifyResponse>("/verify", {
+  verify: async (body: VerifyRequest): Promise<{ status: number; data: VerifyResponse }> => {
+    const response = await fetch(`${BASE}/verify`, {
       method: "POST",
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
-    }),
+    });
+    if (!response.ok) {
+      let detail: Record<string, unknown> = {};
+      let message = `${response.status} ${response.statusText}`;
+      try {
+        const errBody = await response.json();
+        const raw = errBody?.detail;
+        if (raw && typeof raw === "object" && !Array.isArray(raw)) {
+          detail = raw as Record<string, unknown>;
+          if (typeof detail.detail === "string") message = detail.detail;
+        } else if (typeof raw === "string") {
+          message = raw;
+        }
+      } catch {
+        /* non-JSON error body; keep the status line */
+      }
+      throw new ApiError(response.status, detail, message);
+    }
+    return { status: response.status, data: (await response.json()) as VerifyResponse };
+  },
 
   /** Which replay scenarios the active dataset can actually honour. */
   demoHints: () => request<DemoHints>("/demo/hints"),

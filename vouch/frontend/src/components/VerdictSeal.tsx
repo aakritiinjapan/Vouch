@@ -37,6 +37,8 @@ export function VerdictSeal({
   const arc = (clamped / 100) * circ;
   const color = RING_COLOR[decision];
   const band = trustBand(clamped);
+  // Below chip/receipt size the inner label/band microtext is illegible; show only the score.
+  const compact = size < 70;
 
   // Guilloché rim: 60 tick marks around the seal.
   const ticks = Array.from({ length: 60 });
@@ -123,27 +125,32 @@ export function VerdictSeal({
         />
       </svg>
 
-      {/* center face */}
+      {/* center face. Below ~70px (chip/receipt sizes) the microtext is illegible, so only the score
+          glyph is shown — the decision + band are printed beside the seal and in the aria-label. */}
       <div className="absolute inset-0 grid place-items-center text-center leading-none">
         <div>
-          <div
-            className="font-mono font-bold tracking-tight"
-            style={{ color, fontSize: size * 0.15 }}
-          >
-            <span aria-hidden>{decisionGlyph[decision]}</span> {decisionLabel[decision]}
-          </div>
+          {!compact && (
+            <div
+              className="font-mono font-bold tracking-tight"
+              style={{ color, fontSize: size * 0.15 }}
+            >
+              <span aria-hidden>{decisionGlyph[decision]}</span> {decisionLabel[decision]}
+            </div>
+          )}
           <div
             className={`num font-bold ${dark ? "text-navy-ink" : "text-ink"}`}
-            style={{ fontSize: size * 0.26, lineHeight: 1 }}
+            style={{ fontSize: compact ? size * 0.34 : size * 0.26, lineHeight: 1 }}
           >
             {clamped}
           </div>
-          <div
-            className={`font-mono uppercase tracking-[0.14em] ${dark ? "text-navy-muted" : "text-ink-muted"}`}
-            style={{ fontSize: size * 0.085 }}
-          >
-            {band.label} · /100
-          </div>
+          {!compact && (
+            <div
+              className={`font-mono uppercase tracking-[0.14em] ${dark ? "text-navy-muted" : "text-ink-muted"}`}
+              style={{ fontSize: size * 0.085 }}
+            >
+              {band.label} · /100
+            </div>
+          )}
         </div>
       </div>
     </div>

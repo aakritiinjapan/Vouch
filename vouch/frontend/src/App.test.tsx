@@ -18,12 +18,15 @@ vi.mock("./api", () => ({
     }),
     history: vi.fn().mockResolvedValue({ points: [], counterfactual: null }),
     verify: vi.fn().mockResolvedValue({
-      decision: "fail",
-      confirmed: false,
-      confidence: 40,
-      brief: "x",
-      failures: [],
-      judge_consulted: false,
+      status: 200,
+      data: {
+        decision: "fail",
+        confirmed: false,
+        confidence: 40,
+        brief: "x",
+        failures: [],
+        judge_consulted: false,
+      },
     }),
   },
 }));

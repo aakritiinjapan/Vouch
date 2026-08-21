@@ -39,10 +39,15 @@ export default {
         },
         // Status — reserved for state, never decoration.
         status: {
-          good: "#0E9E6E", // verified / PASS
-          warning: "#E8A317", // watch / REVIEW
+          good: "#0E9E6E", // verified / PASS (fills, large/bold text)
+          warning: "#E8A317", // watch / REVIEW (fills, dots)
           serious: "#E8722F",
-          critical: "#EE4B34", // held / FAIL
+          critical: "#EE4B34", // held / FAIL (fills, large/bold text)
+          // AA-safe inks for small (~14px, non-bold) text on the paper surface. #EE4B34 etc. only
+          // clear ~3.6:1, so small red/amber copy uses these darker variants instead (all ≥ 4.5:1).
+          criticalInk: "#D53A22",
+          seriousInk: "#B4530A",
+          warningInk: "#8A6A12",
         },
         // Iridescent hologram — the seal sheen + primary CTAs only.
         holo: {
@@ -82,11 +87,6 @@ export default {
           "60%": { opacity: "1", transform: "scale(0.94) rotate(1deg)" },
           "100%": { opacity: "1", transform: "scale(1) rotate(0deg)" },
         },
-        scan: {
-          "0%": { transform: "translateY(-100%)", opacity: "0" },
-          "35%": { opacity: "1" },
-          "100%": { transform: "translateY(220%)", opacity: "0" },
-        },
         ringdraw: {
           from: { "stroke-dashoffset": "var(--ring-len)" },
           to: { "stroke-dashoffset": "var(--ring-off)" },
@@ -103,20 +103,14 @@ export default {
           "0%, 100%": { transform: "translate(0,0)" },
           "50%": { transform: "translate(2%,3%)" },
         },
-        sweep: {
-          from: { transform: "scaleX(0)" },
-          to: { transform: "scaleX(1)" },
-        },
       },
       animation: {
         rise: "rise .4s cubic-bezier(.16,1,.3,1) both",
         stamp: "stamp .55s cubic-bezier(.2,1.1,.3,1) both",
-        scan: "scan 1s cubic-bezier(.4,0,.2,1) both",
         ringdraw: "ringdraw .8s cubic-bezier(.16,1,.3,1) both",
         sheen: "sheen 6s linear infinite",
         holdpulse: "holdpulse 2.4s ease-in-out infinite",
         floaty: "floaty 14s ease-in-out infinite",
-        sweep: "sweep .5s cubic-bezier(.16,1,.3,1) both",
       },
     },
   },

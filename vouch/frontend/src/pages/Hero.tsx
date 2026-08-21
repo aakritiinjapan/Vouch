@@ -114,7 +114,7 @@ export function Hero({ navigate }: { navigate: Navigate }) {
               <p className="eyebrow text-status-critical">Without Vouch</p>
               <ul className="mt-3 space-y-2">
                 <ContrastRow ok={false}>auto-reprices to $19.99</ContrastRow>
-                <ContrastRow ok={false}>−$179.99/unit, margin gone</ContrastRow>
+                <ContrastRow ok={false}>−$951.00/unit, margin gone</ContrastRow>
                 <ContrastRow ok={false}>you find out from your P&amp;L</ContrastRow>
               </ul>
             </div>
@@ -122,7 +122,7 @@ export function Hero({ navigate }: { navigate: Navigate }) {
               <p className="eyebrow text-status-good">With Vouch</p>
               <ul className="mt-3 space-y-2">
                 <ContrastRow ok>catches the bad data</ContrastRow>
-                <ContrastRow ok>holds price at $1,279.99</ContrastRow>
+                <ContrastRow ok>holds price at $6,999.00</ContrastRow>
                 <ContrastRow ok>nothing bad happens</ContrastRow>
               </ul>
             </div>

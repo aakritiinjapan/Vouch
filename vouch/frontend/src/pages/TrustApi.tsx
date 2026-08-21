@@ -17,6 +17,33 @@ import { VerdictSeal } from "../components/VerdictSeal";
 import { TrustLegend } from "../components/TrustLegend";
 import { Button, Card, CheckBadge } from "../components/ui/Bits";
 
+/**
+ * Map the guardian's real severity to a tone, so colour carries information rather than painting
+ * everything red. Small text uses the AA-safe *Ink variants (≥ 4.5:1 on paper).
+ */
+function severityTone(severity: string): { label: string; badge: string; text: string } {
+  switch (severity.toLowerCase()) {
+    case "critical":
+      return {
+        label: "border-status-critical/40 bg-status-critical/10 text-status-criticalInk",
+        badge: "text-status-criticalInk",
+        text: "text-ink-secondary",
+      };
+    case "high":
+      return {
+        label: "border-status-serious/40 bg-status-serious/10 text-status-seriousInk",
+        badge: "text-status-seriousInk",
+        text: "text-ink-secondary",
+      };
+    default: // medium / low / anything else
+      return {
+        label: "border-status-warning/40 bg-status-warning/10 text-status-warningInk",
+        badge: "text-status-warningInk",
+        text: "text-ink-secondary",
+      };
+  }
+}
+
 function curlSnippet(candidateLen: number): string {
   return `curl -X POST $VOUCH/verify \\
   -H 'content-type: application/json' \\
@@ -35,6 +62,7 @@ export function TrustApi({
     () => scenarioByKey(initialScenario).key,
   );
   const [response, setResponse] = useState<VerifyResponse | null>(null);
+  const [status, setStatus] = useState<number | null>(null);
   const [latencyMs, setLatencyMs] = useState<number | null>(null);
   const [running, setRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -52,10 +80,12 @@ export function TrustApi({
         baseline_records: BASELINE,
         is_sample: false,
       });
-      setResponse(res);
+      setResponse(res.data);
+      setStatus(res.status);
       setLatencyMs(Math.round(performance.now() - started));
     } catch (err) {
       setResponse(null);
+      setStatus(err instanceof ApiError ? err.status : null);
       setError(
         err instanceof ApiError || err instanceof Error
           ? err.message
@@ -162,10 +192,12 @@ export function TrustApi({
             <p className="eyebrow">Response</p>
             <p className="font-mono text-[11px] text-ink-muted">
               POST /verify{" "}
-              {response ? (
-                <span className="text-status-good">200</span>
+              {status !== null ? (
+                <span className={status < 400 ? "text-status-good" : "text-status-criticalInk"}>
+                  {status}
+                </span>
               ) : error ? (
-                <span className="text-status-critical">error</span>
+                <span className="text-status-criticalInk">error</span>
               ) : (
                 "…"
               )}
@@ -175,7 +207,7 @@ export function TrustApi({
 
           <div className="p-5">
             {error ? (
-              <p className="rounded-md border border-status-critical/40 bg-status-critical/10 px-3 py-2 text-xs text-status-critical">
+              <p className="rounded-md border border-status-critical/40 bg-status-critical/10 px-3 py-2 text-xs text-status-criticalInk">
                 {error} — is the backend running on :8000?
               </p>
             ) : (
@@ -188,21 +220,26 @@ export function TrustApi({
               <div className="mt-4">
                 <p className="eyebrow mb-2">Failures</p>
                 <ul className="space-y-2">
-                  {response.failures.map((f, i) => (
-                    <li
-                      key={i}
-                      className="rounded-lg border border-hair bg-raised/40 px-3 py-2 text-xs"
-                    >
-                      <div className="flex items-center gap-2">
-                        <CheckBadge code={f.code} />
-                        <span className="font-mono text-[10px] uppercase text-status-critical">
-                          {f.severity}
-                        </span>
-                        <span className="text-ink-muted">· {f.field}</span>
-                      </div>
-                      <p className="mt-1 text-ink-secondary text-pretty">{f.message}</p>
-                    </li>
-                  ))}
+                  {response.failures.map((f, i) => {
+                    const tone = severityTone(f.severity);
+                    return (
+                      <li
+                        key={i}
+                        className="rounded-lg border border-hair bg-raised/40 px-3 py-2 text-xs"
+                      >
+                        <div className="flex items-center gap-2">
+                          <CheckBadge code={f.code} />
+                          <span
+                            className={`rounded border px-1.5 py-0.5 font-mono text-[10px] font-medium uppercase ${tone.label}`}
+                          >
+                            {f.severity}
+                          </span>
+                          <span className="text-ink-muted">· {f.field}</span>
+                        </div>
+                        <p className={`mt-1 text-pretty ${tone.text}`}>{f.message}</p>
+                      </li>
+                    );
+                  })}
                 </ul>
               </div>
             )}

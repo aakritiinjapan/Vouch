@@ -260,7 +260,7 @@ export function HeldCard({
           </span>
         </Fact>
         <Fact label="Competitor price">
-          <span className="text-status-critical">⚠ couldn&rsquo;t verify</span>
+          <span className="text-status-criticalInk">⚠ couldn&rsquo;t verify</span>
         </Fact>
       </dl>
 
