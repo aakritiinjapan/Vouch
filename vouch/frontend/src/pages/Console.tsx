@@ -8,6 +8,8 @@
  * Section order is not fixed — when something is held, held decisions come FIRST.
  */
 
+import { useState } from "react";
+
 import type { DemoHint, HealEvent, Product, Proposal } from "../types";
 import { Receipts } from "../components/Receipts";
 import { HeldCard } from "../components/HeldCard";
@@ -59,6 +61,10 @@ export function Console(props: ConsoleProps) {
 
   const healHints = hints.filter((h) => h.stage === "heal" && h.key !== "healed_good");
 
+  // The heal-event id currently hovered/focused on either list. Lifted here so the held cards and the
+  // receipts can highlight each other's matching row (see link.ts) — the two lists share this id.
+  const [activeLinkId, setActiveLinkId] = useState<number | null>(null);
+
   const heldSection = (
     <section aria-label="Needs your decision">
       <div className="mb-3 flex flex-wrap items-baseline gap-x-3">
@@ -78,12 +84,14 @@ export function Console(props: ConsoleProps) {
         </div>
       ) : (
         <div className="space-y-3">
-          {held.map((proposal, i) => (
+          {held.map((proposal) => (
             <HeldCard
               key={proposal.id}
               proposal={proposal}
               busy={busy}
-              defaultExpanded={i === 0}
+              defaultExpanded={false}
+              activeLinkId={activeLinkId}
+              onLinkActivate={setActiveLinkId}
               onApproveAnyway={(id) => onApprove(id)}
               onSkip={(id) => onReject(id)}
               onViewAsApi={onViewAsApi}
@@ -188,7 +196,11 @@ export function Console(props: ConsoleProps) {
           </div>
 
           <div className="lg:border-l lg:border-hair lg:pl-10">
-            <Receipts events={healEvents} />
+            <Receipts
+              events={healEvents}
+              activeLinkId={activeLinkId}
+              onLinkActivate={setActiveLinkId}
+            />
           </div>
         </div>
       </div>

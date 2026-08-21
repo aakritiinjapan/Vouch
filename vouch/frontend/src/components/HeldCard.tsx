@@ -13,6 +13,7 @@ import { useEffect, useState } from "react";
 
 import { api } from "../api";
 import { money, pct, signedMoney } from "../format";
+import { LINK_HIGHLIGHT_CLASS, proposalLinkId } from "../link";
 import type { History, Proposal } from "../types";
 import { toDecision } from "../verdict";
 import { PriceChart } from "./PriceChart";
@@ -212,6 +213,8 @@ export function HeldCard({
   onSkip,
   onViewAsApi,
   defaultExpanded = true,
+  activeLinkId = null,
+  onLinkActivate,
 }: {
   proposal: Proposal;
   busy: string | null;
@@ -219,6 +222,9 @@ export function HeldCard({
   onSkip: (id: number) => void;
   onViewAsApi?: (proposal: Proposal) => void;
   defaultExpanded?: boolean;
+  /** The heal-event id currently hovered/focused on either list; highlights the matching pair. */
+  activeLinkId?: number | null;
+  onLinkActivate?: (id: number | null) => void;
 }) {
   const [panel, setPanel] = useState<Panel>("none");
   const [confirming, setConfirming] = useState(false);
@@ -229,20 +235,35 @@ export function HeldCard({
 
   const toggle = (next: Panel) => setPanel((current) => (current === next ? "none" : next));
 
+  // The exact id this hold shares with its receipt (see link.ts) — drives the cross-highlight.
+  const linkId = proposalLinkId(proposal.guardian?.heal_event_id);
+  const linked = linkId !== null && linkId === activeLinkId;
+  // onFocus/onBlur on the article catch keyboard focus of any inner control (React focus bubbles).
+  const linkHandlers = onLinkActivate
+    ? {
+        onMouseEnter: () => onLinkActivate(linkId),
+        onMouseLeave: () => onLinkActivate(null),
+        onFocus: () => onLinkActivate(linkId),
+        onBlur: () => onLinkActivate(null),
+      }
+    : {};
+
   // Restrained held treatment: a held-colour left accent bar + one hairline + subtle elevation —
   // the state reads without three full cards engulfing the page like alarms.
-  const shell =
-    "animate-reveal overflow-hidden rounded-lg border border-hair border-l-[3px] border-l-held bg-surface shadow-soft";
+  const shell = `animate-reveal overflow-hidden rounded-lg border border-hair border-l-[3px] border-l-held bg-surface shadow-soft transition duration-200${
+    linked ? ` ${LINK_HIGHLIGHT_CLASS}` : ""
+  }`;
 
   // Collapsed: a compact summary row — name · gauge · exposure · chevron to expand in place.
   if (!expanded) {
     return (
-      <article className={shell}>
+      <article className={shell} data-link-id={linkId ?? undefined} {...linkHandlers}>
         <button
           type="button"
           onClick={() => setExpanded(true)}
           className="flex w-full items-center gap-4 px-5 py-3.5 text-left"
           aria-expanded={false}
+          aria-label="Expand this decision"
         >
           <VerdictGauge decision={decision} score={proposal.confidence} size={44} animate={false} />
           <div className="min-w-0 flex-1">
@@ -270,7 +291,7 @@ export function HeldCard({
   }
 
   return (
-    <article className={shell}>
+    <article className={shell} data-link-id={linkId ?? undefined} {...linkHandlers}>
       <div className="flex items-start justify-between px-6 pt-5">
         <div className="min-w-0">
         <div className="flex flex-wrap items-center gap-2">
