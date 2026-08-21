@@ -1,8 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 
 import { Console } from "./Console";
-import { makeHealEvent, makeHeld, makePending, makeProduct } from "../test/fixtures";
+import { makeGuardian, makeHealEvent, makeHeld, makePending, makeProduct } from "../test/fixtures";
 
 vi.mock("../api", () => ({
   api: { history: vi.fn().mockResolvedValue({ points: [], counterfactual: null }) },
@@ -58,5 +59,56 @@ describe("Console", () => {
   it("shows the vs-Newegg scope line", () => {
     render(<Console {...baseProps()} />);
     expect(screen.getAllByText(/newegg/i).length).toBeGreaterThan(0);
+  });
+
+  it("renders every hold collapsed by default and expands one in place on click", async () => {
+    const held = [
+      makeHeld({ id: 101, guardian: makeGuardian({ heal_event_id: 10 }) }),
+      makeHeld({ id: 102, guardian: makeGuardian({ heal_event_id: 11 }) }),
+    ];
+    const { container } = render(<Console {...baseProps()} held={held} />);
+
+    // Nothing is expanded on initial load: the "Reprice on hold" heading only exists when expanded.
+    expect(screen.queryAllByText(/reprice on hold/i)).toHaveLength(0);
+    const collapsedToggles = screen.getAllByRole("button", { name: /expand this decision/i });
+    expect(collapsedToggles).toHaveLength(2);
+
+    // Clicking one expands it in place, and only it — the other stays collapsed.
+    await userEvent.click(collapsedToggles[0]);
+    expect(screen.getAllByText(/reprice on hold/i)).toHaveLength(1);
+    expect(screen.getAllByRole("button", { name: /expand this decision/i })).toHaveLength(1);
+  });
+
+  it("cross-links a hold to its matching receipt on hover, and back", () => {
+    const held = [makeHeld({ id: 101, guardian: makeGuardian({ heal_event_id: 10 }) })];
+    const events = [makeHealEvent({ id: 10 })];
+    const { container } = render(<Console {...baseProps()} held={held} healEvents={events} />);
+
+    const holdEl = container.querySelector('article[data-link-id="10"]') as HTMLElement;
+    const receiptEl = container.querySelector('li[data-link-id="10"]') as HTMLElement;
+    expect(holdEl).toBeTruthy();
+    expect(receiptEl).toBeTruthy();
+
+    // Idle: neither is highlighted.
+    expect(holdEl.className).not.toMatch(/ring-brand/);
+    expect(receiptEl.className).not.toMatch(/ring-brand/);
+
+    // Hovering the hold highlights the matching receipt.
+    fireEvent.mouseEnter(holdEl);
+    expect(receiptEl.className).toMatch(/ring-brand/);
+    fireEvent.mouseLeave(holdEl);
+    expect(receiptEl.className).not.toMatch(/ring-brand/);
+
+    // Hovering the receipt highlights the matching hold (bidirectional).
+    fireEvent.mouseEnter(receiptEl);
+    expect(holdEl.className).toMatch(/ring-brand/);
+    fireEvent.mouseLeave(receiptEl);
+    expect(holdEl.className).not.toMatch(/ring-brand/);
+
+    // Keyboard focus works the same way.
+    fireEvent.focus(receiptEl);
+    expect(holdEl.className).toMatch(/ring-brand/);
+    fireEvent.blur(receiptEl);
+    expect(holdEl.className).not.toMatch(/ring-brand/);
   });
 });
