@@ -90,11 +90,12 @@ export function Button({
   title?: string;
 }) {
   const variants = {
-    primary: "bg-series text-plane font-semibold hover:bg-series/85",
-    secondary: "bg-raised text-ink hover:bg-raised/70 border border-hair hover:border-axis",
-    ghost: "text-ink-secondary hover:text-ink hover:bg-raised/60",
+    primary:
+      "bg-holo-cta bg-[length:200%_auto] text-white font-semibold shadow-seal hover:bg-right",
+    secondary: "bg-surface text-ink border border-hair hover:border-axis hover:bg-raised",
+    ghost: "text-ink-secondary hover:text-ink hover:bg-raised",
     danger:
-      "bg-transparent text-status-critical border border-status-critical/40 hover:bg-status-critical/10",
+      "bg-transparent text-status-critical border border-status-critical/50 hover:bg-status-critical/10",
   };
   return (
     <button

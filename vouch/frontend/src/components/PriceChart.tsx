@@ -81,7 +81,7 @@ export function PriceChart({ points, counterfactual, showCounterfactual = false 
           <pattern id="unverified-hatch" width="7" height="7" patternUnits="userSpaceOnUse"
                    patternTransform="rotate(45)">
             <rect width="7" height="7" fill="transparent" />
-            <line x1="0" y1="0" x2="0" y2="7" stroke="#ff6b4a" strokeWidth="1.4" opacity="0.22" />
+            <line x1="0" y1="0" x2="0" y2="7" stroke="#EE4B34" strokeWidth="1.4" opacity="0.22" />
           </pattern>
         </defs>
 
@@ -90,7 +90,7 @@ export function PriceChart({ points, counterfactual, showCounterfactual = false 
           const gy = PAD.top + innerH * t;
           return (
             <line key={t} x1={PAD.left} x2={PAD.left + innerW} y1={gy} y2={gy}
-                  stroke="#222e33" strokeWidth="1" />
+                  stroke="#E7E2D8" strokeWidth="1" />
           );
         })}
 
@@ -106,7 +106,7 @@ export function PriceChart({ points, counterfactual, showCounterfactual = false 
               }
               height={innerH}
               fill="url(#unverified-hatch)"
-              stroke="#33434a"
+              stroke="#CFC9BC"
               strokeWidth="1"
               strokeDasharray="3 3"
             />
@@ -131,19 +131,19 @@ export function PriceChart({ points, counterfactual, showCounterfactual = false 
 
         {/* competitor: context, deliberately de-emphasised */}
         {segments.map((seg, k) => (
-          <path key={k} d={line(seg)} fill="none" stroke="#6b8189" strokeWidth="2"
+          <path key={k} d={line(seg)} fill="none" stroke="#6B6B76" strokeWidth="2"
                 strokeLinecap="round" />
         ))}
         {lastConfirmed && (
           <circle cx={x(lastConfirmed.i)} cy={y(lastConfirmed.v)} r="3.5"
-                  fill="#080d0f" stroke="#6b8189" strokeWidth="2" />
+                  fill="#FFFFFF" stroke="#6B6B76" strokeWidth="2" />
         )}
 
         {/* our price: the emphasis series */}
-        <path d={line(ourSeries)} fill="none" stroke="#57b8e0" strokeWidth="2"
+        <path d={line(ourSeries)} fill="none" stroke="#7C5CFF" strokeWidth="2"
               strokeLinecap="round" />
         <circle cx={x(points.length - 1)} cy={y(points.at(-1)!.my_price)} r="4"
-                fill="#57b8e0" stroke="#080d0f" strokeWidth="2" />
+                fill="#7C5CFF" stroke="#FFFFFF" strokeWidth="2" />
         <text x={x(points.length - 1) + 8} y={y(points.at(-1)!.my_price) + 4}
               className="fill-ink text-[10px]">
           {money(points.at(-1)!.my_price, 0)}
@@ -157,11 +157,11 @@ export function PriceChart({ points, counterfactual, showCounterfactual = false 
                 points.length - 1,
               ).toFixed(1)},${y(cfPrice).toFixed(1)}`}
               fill="none"
-              stroke="#ff6b4a"
+              stroke="#EE4B34"
               strokeWidth="2"
               strokeDasharray="5 4"
             />
-            <circle cx={x(points.length - 1)} cy={y(cfPrice)} r="4" fill="#ff6b4a" />
+            <circle cx={x(points.length - 1)} cy={y(cfPrice)} r="4" fill="#EE4B34" />
             <text x={x(points.length - 1) + 8} y={y(cfPrice) + 4}
                   className="fill-status-critical text-[10px]">
               {money(cfPrice, 0)}
@@ -183,7 +183,7 @@ export function PriceChart({ points, counterfactual, showCounterfactual = false 
               className="inline-block h-0.5 w-4 rounded"
               style={{
                 backgroundImage:
-                  "repeating-linear-gradient(90deg,#ff6b4a 0 5px,transparent 5px 9px)",
+                  "repeating-linear-gradient(90deg,#EE4B34 0 5px,transparent 5px 9px)",
               }}
             />
             if we had auto-approved

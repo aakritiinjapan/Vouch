@@ -75,9 +75,9 @@ export function SafeChangesPanel({
   return (
     <Card>
       <SectionHeader
-        title="Routine reprice proposals"
+        title="Ready to apply"
         count={proposals.length}
-        hint="Confident changes, within the safe margin band."
+        hint="Verdict: PASS — confident changes on verified competitor data."
         action={
           <Button
             variant="primary"
@@ -86,7 +86,7 @@ export function SafeChangesPanel({
             disabled={safeCount === 0}
             title={safeCount === 0 ? "Nothing currently qualifies as a safe change" : undefined}
           >
-            Approve all safe changes{safeCount > 0 ? ` (${safeCount})` : ""}
+            Approve all{safeCount > 0 ? ` ${safeCount}` : ""}
           </Button>
         }
       />

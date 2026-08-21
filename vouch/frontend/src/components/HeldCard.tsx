@@ -1,16 +1,12 @@
 /**
- * The star of the console: a decision the guardian refused to make for you.
+ * The core of the console: a decision the guardian refused to make for you.
  *
- * Two design rules drive this card.
+ * Card order follows UI_PLAN: price facts → Verdict Seal → plain-English reason → consequence +
+ * "show the damage" → actions. The seal is the pivot; the same object appears in the receipts and the
+ * Trust API, and `view as API →` bridges this exact row to that surface.
  *
- * The money leads. What the operator needs in the first half-second is not the check name or the
- * confidence score, it is "what would this have cost me?" - so profit_delta_vs_now is set at display
- * size on the COLLAPSED card. It used to live two clicks deep inside a disclosure, which buried the
- * single most persuasive fact the product produces.
- *
- * Every value here is supplied by the backend. The lead sentence is composed from the stored
- * observation price plus the check's stored evidence, so nothing on this card is a hardcoded string
- * pretending to be a finding.
+ * Every value is supplied by the backend — the lead sentence is composed from the stored observation
+ * plus the check's evidence, so nothing here is a hardcoded finding.
  */
 
 import { useEffect, useState } from "react";
@@ -18,16 +14,12 @@ import { useEffect, useState } from "react";
 import { api } from "../api";
 import { money, pct, signedMoney } from "../format";
 import type { History, Proposal } from "../types";
+import { toDecision } from "../verdict";
 import { PriceChart } from "./PriceChart";
-import { Badge, Button, CheckBadge, ConfidenceMeter } from "./ui/Bits";
+import { VerdictSeal } from "./VerdictSeal";
+import { Badge, Button, CheckBadge } from "./ui/Bits";
+import { TrustLegend } from "./TrustLegend";
 
-/**
- * "The healed price ($19.99) matches this competitor's SHIPPING column, not their item price."
- *
- * Built from stored facts - observation.observed_price is the row-level number, evidence.looks_like
- * is the field the guardian matched it against. Falls back to the guardian's own brief when the
- * check did not produce that shape of evidence.
- */
 function leadSentence(proposal: Proposal): string {
   const evidence = proposal.guardian?.evidence ?? {};
   const observed = proposal.source.observed_price;
@@ -53,7 +45,6 @@ function leadSentence(proposal: Proposal): string {
   return proposal.guardian?.brief ?? proposal.reason;
 }
 
-/** Field names inside the guardian's evidence, rendered for a human without losing the machine name. */
 const EVIDENCE_LABELS: Record<string, string> = {
   field: "field examined",
   looks_like: "now matches",
@@ -76,21 +67,19 @@ function formatEvidence(key: string, value: unknown): string {
   return money(value);
 }
 
-/**
- * What "Investigate" opens.
- *
- * This is the guardian's own working: the measured evidence behind the verdict, and the sharpened
- * instruction it then handed back to Scraper Studio. Showing the re-prompt is the point - it is the
- * clearest single proof that Vouch wraps the heal loop rather than watching it from outside.
- */
-function EvidencePanel({ proposal }: { proposal: Proposal }) {
+function EvidencePanel({
+  proposal,
+  onViewAsApi,
+}: {
+  proposal: Proposal;
+  onViewAsApi?: () => void;
+}) {
   const guardian = proposal.guardian;
   if (!guardian) return null;
-
   const rows = Object.entries(guardian.evidence ?? {});
 
   return (
-    <div className="mt-3 animate-rise rounded-md border border-hair bg-plane/70 p-4">
+    <div className="mt-3 animate-rise rounded-lg border border-hair bg-raised/50 p-4">
       <p className="eyebrow">The guardian&rsquo;s working</p>
 
       {rows.length > 0 ? (
@@ -99,7 +88,7 @@ function EvidencePanel({ proposal }: { proposal: Proposal }) {
             <div key={key} className="contents">
               <dt className="min-w-0 text-ink-muted">
                 {EVIDENCE_LABELS[key] ?? key.replace(/_/g, " ")}
-                <span className="ml-1.5 font-mono text-[10px] text-ink-muted/60">{key}</span>
+                <span className="ml-1.5 font-mono text-[10px] text-ink-muted/70">{key}</span>
               </dt>
               <dd className="num text-right text-ink">{formatEvidence(key, value)}</dd>
             </div>
@@ -113,19 +102,29 @@ function EvidencePanel({ proposal }: { proposal: Proposal }) {
 
       <div className="mt-4 border-t border-hair pt-3">
         <p className="eyebrow">
-          Instruction sent back to Scraper Studio · attempt {guardian.attempt} of{" "}
-          {guardian.attempts_total}
+          What we told the scraper to fix · attempt {guardian.attempt} of {guardian.attempts_total}
         </p>
         <p className="mt-2 whitespace-pre-wrap rounded border border-hair bg-surface px-3 py-2 font-mono text-[11px] leading-relaxed text-ink-secondary">
           {guardian.prompt}
         </p>
         <p className="mt-2 text-[11px] text-ink-muted text-pretty">
-          Written by the validator, not by a person — the medians above are what it put in the
-          prompt. Collector{" "}
+          Written by the validator, not a person. Collector{" "}
           <span className="font-mono text-ink-secondary">{guardian.collector_id}</span> was left
-          unchanged; the heal was rejected before anything committed.
+          unchanged — rejected before anything committed.
         </p>
       </div>
+
+      {onViewAsApi && (
+        <div className="mt-3 flex justify-end">
+          <button
+            type="button"
+            onClick={onViewAsApi}
+            className="text-xs font-semibold text-holo-violet hover:underline"
+          >
+            view this verdict as API →
+          </button>
+        </div>
+      )}
     </div>
   );
 }
@@ -148,8 +147,9 @@ function CounterfactualPanel({ proposal }: { proposal: Proposal }) {
   if (!cf) return null;
 
   return (
-    <div className="mt-3 animate-rise rounded-md border border-hair bg-plane/70 p-4">
-      <dl className="grid grid-cols-2 gap-x-6 gap-y-1.5 text-xs sm:grid-cols-4">
+    <div className="mt-3 animate-rise rounded-lg border border-hair bg-raised/50 p-4">
+      <p className="eyebrow">What acting on this would have done</p>
+      <dl className="mt-2.5 grid grid-cols-2 gap-x-6 gap-y-1.5 text-xs sm:grid-cols-4">
         <div className="contents">
           <dt className="text-ink-muted">Our price</dt>
           <dd className="num text-right sm:text-left">
@@ -157,7 +157,7 @@ function CounterfactualPanel({ proposal }: { proposal: Proposal }) {
             <span className="text-ink-muted"> → </span>
             <span className="text-status-critical">{money(cf.applied_price)}</span>
           </dd>
-          <dt className="text-ink-muted">Margin</dt>
+          <dt className="text-ink-muted">Our margin</dt>
           <dd className="num text-right sm:text-left">
             <span className="text-ink-secondary">{pct(cf.margin_pct_now)}</span>
             <span className="text-ink-muted"> → </span>
@@ -176,10 +176,10 @@ function CounterfactualPanel({ proposal }: { proposal: Proposal }) {
         {cf.harm_summary}{" "}
         {cf.harm === "margin" ? (
           <>
-            Our floor rule would have clamped this to {money(cf.applied_price)} rather than following
-            the competitor all the way down — a repricer <em>without</em> one goes to{" "}
+            Our floor rule would clamp this to {money(cf.applied_price)} rather than following the
+            competitor all the way down — a repricer <em>without</em> one goes to{" "}
             {money(cf.naive_price)}, margin {pct(cf.margin_pct_naive, 0)}. A floor caps the disaster;
-            only verifying the number prevents the damage.
+            only verifying the number prevents it.
           </>
         ) : (
           <>
@@ -189,11 +189,20 @@ function CounterfactualPanel({ proposal }: { proposal: Proposal }) {
         )}
       </p>
 
-      {history && (
+      {history && history.points.length > 1 && (
         <div className="mt-4">
           <PriceChart points={history.points} counterfactual={cf} showCounterfactual />
         </div>
       )}
+    </div>
+  );
+}
+
+function Fact({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div>
+      <dt className="eyebrow">{label}</dt>
+      <dd className="num mt-1 text-sm text-ink">{children}</dd>
     </div>
   );
 }
@@ -205,78 +214,100 @@ export function HeldCard({
   busy,
   onApproveAnyway,
   onSkip,
+  onViewAsApi,
 }: {
   proposal: Proposal;
   busy: string | null;
   onApproveAnyway: (id: number) => void;
   onSkip: (id: number) => void;
+  onViewAsApi?: (proposal: Proposal) => void;
 }) {
   const [panel, setPanel] = useState<Panel>("none");
   const [confirming, setConfirming] = useState(false);
   const cf = proposal.counterfactual;
   const applied = cf?.applied_price ?? null;
+  const decision = toDecision(proposal.guardian?.verdict, proposal.confidence);
 
   const toggle = (next: Panel) => setPanel((current) => (current === next ? "none" : next));
 
   return (
-    <article className="animate-rise overflow-hidden rounded-lg bg-surface shadow-held">
-      {/* A warm hairline across the top. The whole console runs cool until something is held. */}
-      <div className="h-[3px] origin-left animate-sweep bg-gradient-to-r from-status-critical via-status-critical/60 to-transparent" />
+    <article className="animate-rise overflow-hidden rounded-2xl bg-surface shadow-held">
+      <div className="h-[3px] bg-holo-cta bg-[length:200%_auto] animate-sheen" />
 
-      {/* The check badge sits beside the title, never floated to the far right: these product names
-          run to 120 characters, and a justify-between header wraps the badge onto its own line for
-          some cards and not others, which reads as a layout bug across a stack of them. */}
       <div className="px-5 pt-4">
         <div className="flex flex-wrap items-center gap-2">
           <h3 className="flex items-center gap-2 text-[13px] font-semibold tracking-tight text-ink">
-            <span className="animate-holdpulse text-status-critical" aria-hidden>
-              ⏸
-            </span>
-            Reprice held
+            <span
+              className="inline-block size-2 animate-holdpulse rounded-full bg-status-critical"
+              aria-hidden
+            />
+            Reprice on hold
           </h3>
           {proposal.guardian?.check_code && <CheckBadge code={proposal.guardian.check_code} />}
         </div>
         <p className="mt-1 truncate text-xs text-ink-secondary" title={proposal.product.name}>
-          {proposal.product.name}
+          {proposal.product.name} · vs Newegg
         </p>
       </div>
 
-      {/* THE HERO. What this would have cost, on the collapsed card, at display size. */}
-      {cf && (
-        <div className="mt-3 flex flex-wrap items-end gap-x-5 gap-y-1 px-5">
-          <p className="num text-hero font-bold text-status-critical">
-            {signedMoney(cf.profit_delta_vs_now)}
-          </p>
-          <p className="pb-1.5 text-xs text-ink-secondary text-pretty">
-            {cf.harm === "competitiveness"
-              ? "per unit above today’s price — we’d lose the sale, not the margin"
-              : "per unit of margin, on every one sold, had we auto-approved"}
-          </p>
+      {/* 1. price facts */}
+      <dl className="mt-4 grid grid-cols-3 gap-3 px-5">
+        <Fact label="Our price">{money(proposal.current_price)}</Fact>
+        <Fact label="Our margin">
+          {pct(proposal.margin_pct_now)}{" "}
+          <span className="text-[11px] font-normal text-ink-muted">
+            (floor ≈ {money(proposal.floor_price)})
+          </span>
+        </Fact>
+        <Fact label="Competitor price">
+          <span className="text-status-critical">⚠ couldn&rsquo;t verify</span>
+        </Fact>
+      </dl>
+
+      {/* 2. Verdict Seal + 3. plain-English reason */}
+      <div className="mt-4 flex items-start gap-4 px-5">
+        <VerdictSeal decision={decision} score={proposal.confidence} size={92} />
+        <div className="min-w-0">
+          <p className="text-sm leading-relaxed text-ink text-pretty">{leadSentence(proposal)}</p>
+          {onViewAsApi && (
+            <button
+              type="button"
+              onClick={() => onViewAsApi(proposal)}
+              className="mt-2 text-xs font-semibold text-holo-violet hover:underline"
+            >
+              view as API →
+            </button>
+          )}
         </div>
-      )}
-
-      <p className="mt-3 px-5 text-sm leading-relaxed text-ink text-pretty">
-        {leadSentence(proposal)}
-      </p>
-
-      <div className="mt-3.5 px-5">
-        <ConfidenceMeter confidence={proposal.confidence} size="large" />
       </div>
 
       <p className="mt-3 px-5 text-xs text-ink-muted">
         source: <span className="text-ink-secondary">{new URL(proposal.source.url).hostname}</span>{" "}
         · <Badge tone="critical">unconfirmed</Badge> · {proposal.source.last_confirmed_label}
-        {proposal.guardian && (
-          <>
-            {" "}
-            · attempt {proposal.guardian.attempt} of {proposal.guardian.attempts_total}
-          </>
-        )}
       </p>
+
+      {/* 4. consequence */}
+      {cf && (
+        <div className="mt-3 flex flex-wrap items-baseline gap-x-2 px-5">
+          <span className="eyebrow">If auto-applied</span>
+          <span className="num text-lg font-bold text-status-critical">
+            {signedMoney(cf.profit_delta_vs_now)}
+          </span>
+          <span className="text-xs text-ink-muted text-pretty">
+            {cf.harm === "competitiveness"
+              ? "per unit above today’s price — we’d lose the sale"
+              : "per unit of margin, on every one sold"}
+          </span>
+        </div>
+      )}
+
+      <div className="mt-3 px-5">
+        <TrustLegend />
+      </div>
 
       {panel === "evidence" && (
         <div className="px-5">
-          <EvidencePanel proposal={proposal} />
+          <EvidencePanel proposal={proposal} onViewAsApi={onViewAsApi && (() => onViewAsApi(proposal))} />
         </div>
       )}
       {panel === "counterfactual" && (
@@ -285,8 +316,6 @@ export function HeldCard({
         </div>
       )}
 
-      {/* Approving a hold is deliberate by design: it takes a second, explicit confirmation that
-          states the price being applied. The backend also refuses it without force=true. */}
       <div className="mt-4 flex flex-wrap items-center gap-2 border-t border-hair px-5 py-3">
         {confirming ? (
           <>
@@ -335,7 +364,7 @@ export function HeldCard({
               onClick={() => onSkip(proposal.id)}
               busy={busy === `reject-${proposal.id}`}
             >
-              Skip this cycle
+              Skip
             </Button>
           </>
         )}

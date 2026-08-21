@@ -1,0 +1,49 @@
+import { describe, expect, it, vi } from "vitest";
+import { render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+
+import { TrustApi } from "./TrustApi";
+import { api } from "../api";
+
+vi.mock("../api", () => ({
+  api: {
+    verify: vi.fn().mockResolvedValue({
+      decision: "fail",
+      confirmed: false,
+      confidence: 40,
+      brief: "'price' matches the distribution of 'shipping'.",
+      failures: [
+        { code: "COLUMN_SWAP", severity: "critical", field: "price", message: "swapped", evidence: {} },
+      ],
+      judge_consulted: false,
+    }),
+  },
+}));
+
+const verify = vi.mocked(api.verify);
+
+describe("TrustApi", () => {
+  it("calls verify() with candidate + baseline records and renders the decision and failures", async () => {
+    render(<TrustApi />);
+    await waitFor(() => expect(verify).toHaveBeenCalled());
+    const arg = verify.mock.calls[0][0];
+    expect(Array.isArray(arg.candidate_records)).toBe(true);
+    expect(arg.candidate_records.length).toBeGreaterThan(0);
+    expect(Array.isArray(arg.baseline_records)).toBe(true);
+
+    expect((await screen.findAllByText(/COLUMN_SWAP/)).length).toBeGreaterThan(0);
+    expect(screen.getByRole("img", { name: /fail/i })).toBeInTheDocument();
+  });
+
+  it("re-runs verify when the scenario changes", async () => {
+    render(<TrustApi />);
+    await waitFor(() => expect(verify).toHaveBeenCalled());
+    verify.mockClear();
+
+    await userEvent.click(screen.getByRole("radio", { name: /clean heal/i }));
+    await waitFor(() => expect(verify).toHaveBeenCalled());
+    const arg = verify.mock.calls.at(-1)![0];
+    expect(Array.isArray(arg.candidate_records)).toBe(true);
+    expect(Array.isArray(arg.baseline_records)).toBe(true);
+  });
+});
