@@ -11,6 +11,8 @@ import "@fontsource/chivo/700.css";
 import "@fontsource/jetbrains-mono/400.css";
 import "@fontsource/jetbrains-mono/500.css";
 import "@fontsource/jetbrains-mono/700.css";
+// Fraunces (variable) carries the display/verdict voice — serif = pronouncement.
+import "@fontsource-variable/fraunces";
 
 import App from "./App";
 import "./index.css";

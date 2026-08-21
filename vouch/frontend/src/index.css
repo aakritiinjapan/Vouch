@@ -4,45 +4,54 @@
 
 @layer base {
   html {
-    color-scheme: dark;
+    color-scheme: light;
   }
   body {
-    @apply bg-plane text-ink font-sans antialiased;
-    /* A faint vertical gradient reads as a lit instrument face rather than a flat fill. Fixed so it
-       does not travel with the scroll and turn into a visible band. */
-    background-image: radial-gradient(
-      120% 70% at 50% -10%,
-      rgba(87, 184, 224, 0.055) 0%,
-      transparent 62%
-    );
+    @apply bg-paper text-ink font-sans antialiased;
+    /* Guilloché-inspired line-work — the faint engraved texture of a security document, kept far
+       below the content so it reads as paper stock, not decoration. */
+    background-image:
+      radial-gradient(120% 80% at 50% -20%, rgba(124, 92, 255, 0.045), transparent 60%),
+      repeating-linear-gradient(
+        45deg,
+        rgba(26, 26, 34, 0.014) 0px,
+        rgba(26, 26, 34, 0.014) 1px,
+        transparent 1px,
+        transparent 9px
+      );
     background-attachment: fixed;
   }
 
-  /* Every figure the operator compares against another figure is tabular. Prices in a column that
-     shift by a pixel between rows are harder to scan than they look. */
+  /* Every figure the operator compares against another is tabular. */
   .num {
     @apply font-mono;
     font-variant-numeric: tabular-nums;
   }
 
   :focus-visible {
-    @apply outline-none ring-2 ring-series/70 ring-offset-2 ring-offset-plane;
+    @apply outline-none ring-2 ring-holo-violet ring-offset-2 ring-offset-paper;
   }
 
   ::selection {
-    background: rgba(255, 107, 74, 0.28);
+    background: rgba(124, 92, 255, 0.22);
   }
 }
 
 @layer components {
-  /* The uppercase micro-label used on panel headers and field names. */
   .eyebrow {
-    @apply font-mono text-[10px] uppercase tracking-[0.14em] text-ink-muted;
+    @apply font-mono text-[10px] uppercase tracking-[0.16em] text-ink-muted;
+  }
+  /* Iridescent text used sparingly for the wordmark and headline accents. */
+  .holo-text {
+    background: linear-gradient(115deg, #37e0d8 0%, #7c5cff 45%, #f6c560 100%);
+    background-size: 200% auto;
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
   }
 }
 
 @layer utilities {
-  /* Scrollbars inside panels; the default light scrollbar on a dark panel is jarring. */
   .scroll-slim {
     scrollbar-width: thin;
     scrollbar-color: theme("colors.axis") transparent;
@@ -56,6 +65,13 @@
   }
   .scroll-slim::-webkit-scrollbar-track {
     background: transparent;
+  }
+  /* Microtext — the tiny repeated legend on a banknote or certificate border. */
+  .microtext {
+    font-family: theme("fontFamily.mono");
+    font-size: 6px;
+    letter-spacing: 0.35em;
+    text-transform: uppercase;
   }
 }
 
