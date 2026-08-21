@@ -54,4 +54,21 @@ describe("routing", () => {
     await userEvent.click(screen.getByRole("button", { name: /^console$/i }));
     expect((await screen.findAllByText(/pricing desk|needs your decision/i)).length).toBeGreaterThan(0);
   });
+
+  it("scopes the Demo control to the Console route only", async () => {
+    render(<App />);
+
+    // Not on the Hero.
+    expect(await screen.findByText(/the trust layer for scraped data/i)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /demo/i })).not.toBeInTheDocument();
+
+    // Present on the Console.
+    await userEvent.click(screen.getAllByRole("button", { name: /launch console/i })[0]);
+    expect(await screen.findByRole("button", { name: /demo/i })).toBeInTheDocument();
+
+    // Gone again on the Trust API.
+    await userEvent.click(screen.getByRole("button", { name: /^trust api$/i }));
+    expect(await screen.findByText(/run through the guardian/i)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /demo/i })).not.toBeInTheDocument();
+  });
 });

@@ -17,17 +17,9 @@ function baseProps() {
     healEvents: [makeHealEvent()],
     loading: false,
     busy: null as string | null,
-    mockMode: true,
-    hints: [],
-    datasetNote: "8 GPUs",
-    collectorId: "gd_collector_abc",
     onApprove: vi.fn(),
     onReject: vi.fn(),
     onApproveAllSafe: vi.fn(),
-    onRunCycle: vi.fn(),
-    onReplay: vi.fn(),
-    onResume: vi.fn(),
-    onReset: vi.fn(),
     onViewAsApi: vi.fn(),
   };
 }

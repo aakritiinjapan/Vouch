@@ -31,8 +31,6 @@ export default function App() {
   const { route, navigate } = useRoute();
   const vouch = useVouch();
 
-  const collectorId = vouch.products.find((p) => p.collector_id)?.collector_id ?? null;
-
   const onViewAsApi = (proposal: Proposal) =>
     navigate("trust-api", {
       scenario: scenarioForProposal(proposal),
@@ -43,9 +41,25 @@ export default function App() {
     return <Hero navigate={navigate} />;
   }
 
+  // The Demo control is Console-only (its actions run cycles) and, like the old strip, only exists in
+  // MOCK_MODE. Passing it solely on the console route is what scopes it away from Hero / Trust API.
+  const demo =
+    route.view === "console" && vouch.mockMode
+      ? {
+          hints: vouch.hints?.hints ?? [],
+          busy: vouch.mutating,
+          onRunCycle: () => vouch.runCycle(),
+          onReplay: (healKey: string) =>
+            vouch.runCycle({ simulate_run: "run_degraded", simulate_heal: [healKey, healKey] }),
+          onResume: () =>
+            vouch.runCycle({ simulate_run: "run_degraded", simulate_heal: "healed_swapped" }),
+          onReset: vouch.resetDemo,
+        }
+      : undefined;
+
   return (
     <div className="min-h-screen">
-      <Nav view={route.view} navigate={navigate} />
+      <Nav view={route.view} navigate={navigate} demo={demo} />
 
       {vouch.error && (
         <div className="mx-auto mt-4 max-w-[1200px] px-6">
@@ -79,21 +93,9 @@ export default function App() {
           healEvents={vouch.healEvents}
           loading={vouch.loading}
           busy={vouch.mutating}
-          mockMode={vouch.mockMode}
-          hints={vouch.hints?.hints ?? []}
-          datasetNote={vouch.hints?.dataset_note ?? ""}
-          collectorId={collectorId}
           onApprove={(id) => vouch.approve(id, true)}
           onReject={(id) => vouch.reject(id, "skipped")}
           onApproveAllSafe={vouch.approveAllSafe}
-          onRunCycle={() => vouch.runCycle()}
-          onReplay={(healKey) =>
-            vouch.runCycle({ simulate_run: "run_degraded", simulate_heal: [healKey, healKey] })
-          }
-          onResume={() =>
-            vouch.runCycle({ simulate_run: "run_degraded", simulate_heal: "healed_swapped" })
-          }
-          onReset={vouch.resetDemo}
           onViewAsApi={onViewAsApi}
         />
       )}

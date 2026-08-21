@@ -6,13 +6,24 @@
 
 import type { Navigate, View } from "../hooks/useRoute";
 import { Wordmark } from "./Wordmark";
+import { DemoMenu, type DemoMenuProps } from "./DemoMenu";
 
 const TABS: { view: View; label: string }[] = [
   { view: "console", label: "Console" },
   { view: "trust-api", label: "Trust API" },
 ];
 
-export function Nav({ view, navigate }: { view: View; navigate: Navigate }) {
+export function Nav({
+  view,
+  navigate,
+  demo,
+}: {
+  view: View;
+  navigate: Navigate;
+  /** The Demo control's handlers + replay hints. Console-only — its actions run cycles, so it is
+   *  passed (and thus rendered) only on the console route, never on Hero or Trust API. */
+  demo?: DemoMenuProps;
+}) {
   return (
     <header className="sticky top-0 z-20 border-b border-hair bg-canvas/80 backdrop-blur-md">
       <div className="mx-auto flex max-w-[1200px] flex-wrap items-center gap-x-6 gap-y-2 px-6 py-3.5">
@@ -47,6 +58,7 @@ export function Nav({ view, navigate }: { view: View; navigate: Navigate }) {
         </nav>
 
         <div className="ml-auto flex min-w-0 items-center gap-2.5 text-sm text-ink-secondary">
+          {demo && <DemoMenu {...demo} />}
           <span className="grid size-6 shrink-0 place-items-center rounded-md bg-aurora text-xs font-bold text-canvas">
             V
           </span>

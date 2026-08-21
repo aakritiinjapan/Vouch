@@ -10,13 +10,13 @@
 
 import { useState } from "react";
 
-import type { DemoHint, HealEvent, Product, Proposal } from "../types";
+import type { HealEvent, Product, Proposal } from "../types";
 import { Receipts } from "../components/Receipts";
 import { HeldCard } from "../components/HeldCard";
 import { SafeChangesPanel } from "../components/SafeChangesPanel";
 import { StatusRibbon } from "../components/StatusRibbon";
 import { TrustMetrics } from "../components/TrustMetrics";
-import { Button, EmptyState } from "../components/ui/Bits";
+import { EmptyState } from "../components/ui/Bits";
 
 export interface ConsoleProps {
   products: Product[];
@@ -25,17 +25,9 @@ export interface ConsoleProps {
   healEvents: HealEvent[];
   loading: boolean;
   busy: string | null;
-  mockMode: boolean;
-  hints: DemoHint[];
-  datasetNote: string;
-  collectorId: string | null;
   onApprove: (id: number) => void;
   onReject: (id: number) => void;
   onApproveAllSafe: () => void;
-  onRunCycle: () => void;
-  onReplay: (healKey: string) => void;
-  onResume: () => void;
-  onReset: () => void;
   onViewAsApi: (proposal: Proposal) => void;
 }
 
@@ -47,19 +39,11 @@ export function Console(props: ConsoleProps) {
     healEvents,
     loading,
     busy,
-    mockMode,
-    hints,
     onApprove,
     onReject,
     onApproveAllSafe,
-    onRunCycle,
-    onReplay,
-    onResume,
-    onReset,
     onViewAsApi,
   } = props;
-
-  const healHints = hints.filter((h) => h.stage === "heal" && h.key !== "healed_good");
 
   // The heal-event id currently hovered/focused on either list. Lifted here so the held cards and the
   // receipts can highlight each other's matching row (see link.ts) — the two lists share this id.
@@ -133,44 +117,10 @@ export function Console(props: ConsoleProps) {
         </div>
       </div>
 
-      {/* demo strip */}
-      {mockMode && (
-        <div className="mt-5 rounded-lg border border-dashed border-hairStrong bg-white/[0.02] px-4 py-3.5">
-          <p className="eyebrow mb-2.5 text-brand-soft">▶ Demo — simulate real scraping events</p>
-          <div className="flex flex-wrap items-center gap-2">
-            <Button variant="primary" onClick={onRunCycle} busy={busy === "run-cycle"}>
-              Check competitors now
-            </Button>
-            {healHints.map((hint) => (
-              <Button
-                key={hint.key}
-                variant="secondary"
-                onClick={() => onReplay(hint.key)}
-                busy={busy === "run-cycle"}
-                title={hint.detail}
-              >
-                {hint.label}
-              </Button>
-            ))}
-            <Button
-              variant="secondary"
-              onClick={onResume}
-              busy={busy === "run-cycle"}
-              title="Re-prompt the heal with the guardian's own diagnosis, then re-validate"
-            >
-              Re-prompt &amp; resume
-            </Button>
-            <Button variant="ghost" onClick={onReset} busy={busy === "reset"}>
-              ↻ Reset demo
-            </Button>
-          </div>
-        </div>
-      )}
-
       <div
         className={busy ? "pointer-events-none opacity-60 transition-opacity" : "transition-opacity"}
       >
-        <div className="mt-6">
+        <div className="mt-8">
           <StatusRibbon held={held} pending={pending} products={products} />
         </div>
 
