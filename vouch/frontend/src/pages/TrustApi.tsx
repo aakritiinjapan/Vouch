@@ -107,7 +107,7 @@ export function TrustApi({
         )}
       </div>
 
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+      <div className="grid grid-cols-1 items-start gap-6 lg:grid-cols-2">
         {/* TRY IT */}
         <Card className="p-6">
           <p className="eyebrow">Try it</p>
@@ -195,7 +195,7 @@ export function TrustApi({
                 {error} — is the backend running on :8000?
               </p>
             ) : (
-              <pre className="scroll-slim overflow-x-auto rounded-md border border-hair bg-canvas p-4 font-mono text-[11px] leading-relaxed text-ink-secondary">
+              <pre className="scroll-slim max-h-[22rem] overflow-auto rounded-md border border-hair bg-canvas p-4 font-mono text-[11px] leading-relaxed text-ink-secondary">
                 <code>{response ? JSON.stringify(response, null, 2) : "Running…"}</code>
               </pre>
             )}
