@@ -56,13 +56,13 @@ export function confidenceSeverity(confidence: number): Severity {
 }
 
 export const severityText: Record<Severity, string> = {
-  good: "text-status-good",
-  warning: "text-status-warning",
-  critical: "text-status-critical",
+  good: "text-verified",
+  warning: "text-watch",
+  critical: "text-held",
 };
 
 export const severityBg: Record<Severity, string> = {
-  good: "bg-status-good",
-  warning: "bg-status-warning",
-  critical: "bg-status-critical",
+  good: "bg-verified",
+  warning: "bg-watch",
+  critical: "bg-held",
 };

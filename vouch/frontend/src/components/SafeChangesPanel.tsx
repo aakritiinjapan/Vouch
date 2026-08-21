@@ -1,8 +1,7 @@
 /**
- * README section 7, TOP: the routine batch.
- *
- * These are changes Vouch is confident about. The seller's job here is one click - anything needing
- * judgment belongs in HeldDecisions below, not in this list.
+ * The routine batch — changes Vouch is confident about (verdict: PASS on verified competitor data).
+ * The seller's job here is one click; anything needing judgment belongs in the held section, not here.
+ * A single raised region with a hairline header, matching the console's few-boxes rhythm.
  */
 
 import { money, pct, signedMoney } from "../format";
@@ -23,7 +22,7 @@ function ProposalRow({
   const up = proposal.delta > 0;
 
   return (
-    <li className="flex flex-wrap items-center gap-x-4 gap-y-2 px-5 py-3 hover:bg-raised/40">
+    <li className="flex flex-wrap items-center gap-x-4 gap-y-2 px-5 py-3.5 transition-colors hover:bg-white/[0.02]">
       <div className="min-w-0 flex-1">
         <p className="truncate text-sm text-ink">{proposal.product.name}</p>
         <p className="text-xs text-ink-muted">
@@ -31,15 +30,15 @@ function ProposalRow({
         </p>
       </div>
 
-      <div className="num-tabular flex items-baseline gap-2 text-sm">
+      <div className="num flex items-baseline gap-2 text-sm">
         <span className="text-ink-muted line-through">{money(proposal.current_price)}</span>
         <span className="text-ink">{money(proposal.proposed_price)}</span>
-        <span className={up ? "text-status-good text-xs" : "text-status-warning text-xs"}>
+        <span className={up ? "text-xs text-verified" : "text-xs text-watch"}>
           {signedMoney(proposal.delta)}
         </span>
       </div>
 
-      <div className="num-tabular w-24 text-right text-xs text-ink-secondary">
+      <div className="num w-24 text-right text-xs text-ink-secondary">
         margin {pct(proposal.margin_pct_after)}
       </div>
 
@@ -72,12 +71,22 @@ export function SafeChangesPanel({
 }) {
   const safeCount = proposals.filter((p) => p.is_safe).length;
 
+  // Nothing routine to review: a slim one-line note rather than a tall empty card.
+  if (!loading && proposals.length === 0) {
+    return (
+      <p className="border-t border-hair pt-4 text-sm text-ink-muted text-pretty">
+        <span className="font-medium text-ink-secondary">Ready to apply</span> — Nothing routine to
+        review; every confirmed source is already priced where Vouch would put it.
+      </p>
+    );
+  }
+
   return (
     <Card>
       <SectionHeader
-        title="Routine reprice proposals"
+        title="Ready to apply"
         count={proposals.length}
-        hint="Confident changes, within the safe margin band."
+        hint="Verdict: PASS — confident changes on verified competitor data."
         action={
           <Button
             variant="primary"
@@ -86,7 +95,7 @@ export function SafeChangesPanel({
             disabled={safeCount === 0}
             title={safeCount === 0 ? "Nothing currently qualifies as a safe change" : undefined}
           >
-            Approve all safe changes{safeCount > 0 ? ` (${safeCount})` : ""}
+            Approve all{safeCount > 0 ? ` ${safeCount}` : ""}
           </Button>
         }
       />

@@ -19,7 +19,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Optional
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 from sqlmodel import Session, select
 
 from app import service
@@ -352,6 +352,53 @@ class HistoryOut(BaseModel):
     points: list[HistoryPoint]
     counterfactual: Optional[dict]
     last_confirmed_label: str
+
+
+# --------------------------------------------------------------------------------------
+# trust layer - the stateless /verify surface
+# --------------------------------------------------------------------------------------
+
+class VerifyRequest(BaseModel):
+    """A caller hands us the rows to judge and a reference to judge them against.
+
+    The reference comes one of two ways, and exactly one must be given (validated in the route):
+    `baseline_records` are raw last-known-good rows we profile server-side, and `baseline_profiles`
+    are profiles the caller already computed (e.g. read off a stored Baseline). Everything else is
+    optional and mirrors the knobs the internal guardian already exposes.
+
+    `baseline_count` is inferred when omitted, from EITHER shape: from len(baseline_records) on the
+    raw path, or from the profiles' own `count` on the precomputed path - so ROW_COUNT_SHIFT stays
+    live either way rather than silently no-opping on a defaulted zero.
+
+    This is the public infra contract, so unknown fields are rejected (extra="forbid") - a typo'd
+    knob like `use_jugde` must error, not silently no-op.
+    """
+    model_config = ConfigDict(extra="forbid")
+
+    candidate_records: list[dict]                          # REQUIRED, non-empty - the rows to judge
+    baseline_records: Optional[list[dict]] = None          # raw reference rows, profiled here
+    baseline_profiles: Optional[dict[str, dict]] = None    # precomputed serialized FieldProfiles
+    baseline_count: Optional[int] = None                   # inferred from the baseline when omitted
+    is_sample: bool = False                                 # candidate is a preview - suppress volume
+    use_judge: bool = False                                 # allow Tier 3 (no-op in mock / no key)
+
+
+class VerifyFailure(BaseModel):
+    """One failed check, flattened from a guardian CheckResult for the wire."""
+    code: str
+    severity: str
+    field: str
+    message: str
+    evidence: dict
+
+
+class VerifyResponse(BaseModel):
+    decision: str                 # pass | review | fail
+    confirmed: bool               # decision == pass
+    confidence: int               # 0-100
+    brief: str
+    failures: list[VerifyFailure]
+    judge_consulted: bool
 
 
 # --------------------------------------------------------------------------------------

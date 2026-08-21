@@ -7,55 +7,82 @@
     color-scheme: dark;
   }
   body {
-    @apply bg-plane text-ink font-sans antialiased;
-    /* A faint vertical gradient reads as a lit instrument face rather than a flat fill. Fixed so it
-       does not travel with the scroll and turn into a visible band. */
-    background-image: radial-gradient(
-      120% 70% at 50% -10%,
-      rgba(87, 184, 224, 0.055) 0%,
-      transparent 62%
-    );
-    background-attachment: fixed;
+    @apply bg-canvas text-ink font-sans antialiased;
+    font-size: 15px;
+    line-height: 1.55;
+    /* The canvas is never flat black: ONE soft violet→mint glow high behind the hero, plus a faint
+       grain so large dark fields read as a printed surface rather than a void. */
+    background-color: #0b0a10;
+    background-image:
+      radial-gradient(60% 45% at 50% -8%, rgba(139, 124, 255, 0.16), transparent 62%),
+      radial-gradient(45% 40% at 88% 4%, rgba(74, 222, 158, 0.06), transparent 60%),
+      url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.025'/%3E%3C/svg%3E");
+    background-attachment: fixed, fixed, fixed;
+    background-repeat: no-repeat, no-repeat, repeat;
   }
 
-  /* Every figure the operator compares against another figure is tabular. Prices in a column that
-     shift by a pixel between rows are harder to scan than they look. */
+  /* Every figure the operator compares against another is tabular mono. */
   .num {
     @apply font-mono;
     font-variant-numeric: tabular-nums;
+    letter-spacing: -0.01em;
   }
 
+  /* Visible brand-colour focus ring on every interactive element. */
   :focus-visible {
-    @apply outline-none ring-2 ring-series/70 ring-offset-2 ring-offset-plane;
+    @apply outline-none;
+    box-shadow:
+      0 0 0 2px #0b0a10,
+      0 0 0 4px #8b7cff;
+    border-radius: 8px;
   }
 
   ::selection {
-    background: rgba(255, 107, 74, 0.28);
+    background: rgba(139, 124, 255, 0.28);
+    color: #f4f2ec;
+  }
+
+  /* Display voice — Bricolage carries the editorial drama; tighten tracking optically. */
+  .font-display {
+    font-optical-sizing: auto;
   }
 }
 
 @layer components {
-  /* The uppercase micro-label used on panel headers and field names. */
+  /* label / eyebrow — 11px mono uppercase +0.16em, muted. */
   .eyebrow {
-    @apply font-mono text-[10px] uppercase tracking-[0.14em] text-ink-muted;
+    @apply font-mono uppercase text-ink-muted;
+    font-size: 11px;
+    letter-spacing: 0.16em;
+    line-height: 1.2;
+  }
+  /* A single hairline rule, the editorial divider used instead of boxes. */
+  .rule {
+    border-color: rgba(255, 255, 255, 0.07);
   }
 }
 
 @layer utilities {
-  /* Scrollbars inside panels; the default light scrollbar on a dark panel is jarring. */
   .scroll-slim {
     scrollbar-width: thin;
-    scrollbar-color: theme("colors.axis") transparent;
+    scrollbar-color: rgba(255, 255, 255, 0.14) transparent;
   }
   .scroll-slim::-webkit-scrollbar {
     width: 8px;
   }
   .scroll-slim::-webkit-scrollbar-thumb {
-    background: theme("colors.axis");
+    background: rgba(255, 255, 255, 0.14);
     border-radius: 4px;
   }
   .scroll-slim::-webkit-scrollbar-track {
     background: transparent;
+  }
+  /* The aurora, clipped to text — reserved for the single hero accent word. */
+  .text-aurora {
+    background: linear-gradient(115deg, #a79bff 0%, #7cc6ff 45%, #4ade9e 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
   }
 }
 

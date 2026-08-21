@@ -81,7 +81,7 @@ export function PriceChart({ points, counterfactual, showCounterfactual = false 
           <pattern id="unverified-hatch" width="7" height="7" patternUnits="userSpaceOnUse"
                    patternTransform="rotate(45)">
             <rect width="7" height="7" fill="transparent" />
-            <line x1="0" y1="0" x2="0" y2="7" stroke="#ff6b4a" strokeWidth="1.4" opacity="0.22" />
+            <line x1="0" y1="0" x2="0" y2="7" stroke="#FF5C5C" strokeWidth="1.4" opacity="0.30" />
           </pattern>
         </defs>
 
@@ -90,7 +90,7 @@ export function PriceChart({ points, counterfactual, showCounterfactual = false 
           const gy = PAD.top + innerH * t;
           return (
             <line key={t} x1={PAD.left} x2={PAD.left + innerW} y1={gy} y2={gy}
-                  stroke="#222e33" strokeWidth="1" />
+                  stroke="rgba(255,255,255,0.08)" strokeWidth="1" />
           );
         })}
 
@@ -106,7 +106,7 @@ export function PriceChart({ points, counterfactual, showCounterfactual = false 
               }
               height={innerH}
               fill="url(#unverified-hatch)"
-              stroke="#33434a"
+              stroke="rgba(255,255,255,0.14)"
               strokeWidth="1"
               strokeDasharray="3 3"
             />
@@ -122,7 +122,7 @@ export function PriceChart({ points, counterfactual, showCounterfactual = false 
               textAnchor={
                 x(Math.min(...gapIndexes)) > PAD.left + innerW * 0.5 ? "end" : "start"
               }
-              className="fill-status-critical text-[9px] font-medium"
+              className="fill-held text-[9px] font-medium"
             >
               unverified — no line drawn
             </text>
@@ -131,19 +131,19 @@ export function PriceChart({ points, counterfactual, showCounterfactual = false 
 
         {/* competitor: context, deliberately de-emphasised */}
         {segments.map((seg, k) => (
-          <path key={k} d={line(seg)} fill="none" stroke="#6b8189" strokeWidth="2"
+          <path key={k} d={line(seg)} fill="none" stroke="#8A8896" strokeWidth="2"
                 strokeLinecap="round" />
         ))}
         {lastConfirmed && (
           <circle cx={x(lastConfirmed.i)} cy={y(lastConfirmed.v)} r="3.5"
-                  fill="#080d0f" stroke="#6b8189" strokeWidth="2" />
+                  fill="#0B0A10" stroke="#8A8896" strokeWidth="2" />
         )}
 
         {/* our price: the emphasis series */}
-        <path d={line(ourSeries)} fill="none" stroke="#57b8e0" strokeWidth="2"
+        <path d={line(ourSeries)} fill="none" stroke="#8B7CFF" strokeWidth="2"
               strokeLinecap="round" />
         <circle cx={x(points.length - 1)} cy={y(points.at(-1)!.my_price)} r="4"
-                fill="#57b8e0" stroke="#080d0f" strokeWidth="2" />
+                fill="#8B7CFF" stroke="#0B0A10" strokeWidth="2" />
         <text x={x(points.length - 1) + 8} y={y(points.at(-1)!.my_price) + 4}
               className="fill-ink text-[10px]">
           {money(points.at(-1)!.my_price, 0)}
@@ -157,13 +157,13 @@ export function PriceChart({ points, counterfactual, showCounterfactual = false 
                 points.length - 1,
               ).toFixed(1)},${y(cfPrice).toFixed(1)}`}
               fill="none"
-              stroke="#ff6b4a"
+              stroke="#FF5C5C"
               strokeWidth="2"
               strokeDasharray="5 4"
             />
-            <circle cx={x(points.length - 1)} cy={y(cfPrice)} r="4" fill="#ff6b4a" />
+            <circle cx={x(points.length - 1)} cy={y(cfPrice)} r="4" fill="#FF5C5C" />
             <text x={x(points.length - 1) + 8} y={y(cfPrice) + 4}
-                  className="fill-status-critical text-[10px]">
+                  className="fill-held text-[10px]">
               {money(cfPrice, 0)}
             </text>
           </>
@@ -172,18 +172,18 @@ export function PriceChart({ points, counterfactual, showCounterfactual = false 
 
       <figcaption className="mt-1 flex flex-wrap items-center gap-x-4 gap-y-1 px-1 text-[11px] text-ink-muted">
         <span className="flex items-center gap-1.5">
-          <span className="inline-block h-0.5 w-4 rounded bg-series" /> our price
+          <span className="inline-block h-0.5 w-4 rounded bg-brand" /> our price
         </span>
         <span className="flex items-center gap-1.5">
           <span className="inline-block h-0.5 w-4 rounded bg-ink-muted" /> competitor (verified)
         </span>
         {cfPrice !== null && (
-          <span className="flex items-center gap-1.5 text-status-critical">
+          <span className="flex items-center gap-1.5 text-held">
             <span
               className="inline-block h-0.5 w-4 rounded"
               style={{
                 backgroundImage:
-                  "repeating-linear-gradient(90deg,#ff6b4a 0 5px,transparent 5px 9px)",
+                  "repeating-linear-gradient(90deg,#FF5C5C 0 5px,transparent 5px 9px)",
               }}
             />
             if we had auto-approved
