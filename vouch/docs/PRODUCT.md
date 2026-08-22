@@ -7,29 +7,37 @@
 ## Positioning
 
 **Vouch is the trust layer for automated decisions made on scraped data.**
-It validates and self-heals a scrape *before* the number is allowed to trigger an
-action — so silently-broken data never moves your business. **Repricing is the
-first application, not the product.**
+It validates a self-heal *before* the number is allowed to trigger an action — so
+silently-broken data never moves your business. (Bright Data Scraper Studio does
+the self-healing; Vouch validates the proposed fix at the approval gate and, when
+it fails, re-prompts a sharper one.) **Repricing is the first application, not the
+product.**
 
 The product is not the reprice. The product is the **verdict**.
 
 ## The primitive: the verdict
 
-Every scraped datapoint produces one portable object:
+Every scraped datapoint produces one portable object. As shipped by `POST /verify`
+(see [AS-IS.md](AS-IS.md) for the authoritative shape):
 
 ```
 verdict = {
-  status:         confirmed | held | rejected,
-  confidence:     0.0 – 1.0,
-  evidence:       [ why we believe / doubt this number ],
-  counterfactual: "if you had trusted this, you would have done X and lost $Y"
+  decision:        pass | review | fail,   // pass→confirm, review→hold, fail→reject
+  confirmed:       true | false,           // == (decision == pass)
+  confidence:      0 – 100,
+  brief:           "plain-English why we believe / doubt this number",
+  failures:        [ { code, severity, field, message, evidence } ],
+  judge_consulted: true | false
 }
 ```
 
-The repricing engine is just the **first consumer** of this verdict. Anything
-else — a different pricing pipeline, an inventory system, an AI agent — could
-consume the same verdict through a gate/webhook/API. Framing the verdict as the
-primitive is what makes Vouch *infrastructure* rather than a tool.
+The repricing engine is just the **first consumer** of this verdict — and it
+consumes it through the *same* boundary an outsider would (`verify_rows` behind
+`POST /verify`), not a private path. Anything else — a different pricing pipeline,
+an inventory system, an AI agent — can gate on the same call (with its own
+schema via `orderings`/`field_descriptions`, and its own model key). That the
+verdict is a real, callable, dogfooded primitive — not just a demo beat — is what
+makes Vouch *infrastructure* rather than a tool.
 
 ## ICP (who v1 is for)
 
@@ -51,9 +59,10 @@ health) pretending to be one. Fix the decision, and the screen resolves.
 ## Two surfaces
 
 1. **The console** — the one-decision screen above.
-2. **The verdict as a gate** — show that the verdict is consumable by something
-   *other than* our own repricer (an API response / webhook / "plug into your
-   pipeline"). This is the 30 seconds that earns the "infrastructure" claim.
+2. **The verdict as a gate** — the verdict is consumable by something *other than*
+   our own repricer: `POST /verify` (its own docs at `/trust/docs`), which any
+   pipeline can call. This is no longer just a demo beat — the repricer itself
+   goes through it, which is what actually earns the "infrastructure" claim.
 
 ## Demo arc (~3 min, judge-facing)
 
