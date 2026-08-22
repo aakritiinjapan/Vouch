@@ -21,12 +21,11 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Optional, Sequence, Union
 
-from app.guardian import judge
-from app.guardian.checks import FieldProfile, run_all_checks
-from app.guardian.verdict import REVIEW, Verdict, apply_judge, decide
+from app.llm import judge_config_from_settings
 from app.models import Baseline, Product
 from app.pricing import engine
 from app.scraper import brightdata
+from app.trust import Verdict, verify_rows
 
 # Hard cap on heal attempts per cycle. Two is deliberate: the demo needs exactly one re-prompt, and
 # every further attempt is a real Scraper Studio heal costing real credits against an AI-Flow
@@ -82,18 +81,22 @@ class CycleOutcome:
 # degradation gate
 # --------------------------------------------------------------------------------------
 
-def _degradation_reason(baseline: Baseline, baseline_profiles: dict[str, FieldProfile],
-                        records: list[dict]) -> Optional[str]:
+def _degradation_reason(baseline: Baseline, records: list[dict]) -> Optional[str]:
     """Why this run is worth healing, in the guardian's own words - or None if it looks fine.
 
-    Returns the failing check's message so HealEvent.trigger_reason and the event log's `run:` line
-    are a measured fact ("'price' is empty on 75% of rows") rather than a sentence someone typed.
+    Goes through the Trust API's verify_rows like every other check in the system, then reads the
+    failing check's message so HealEvent.trigger_reason and the event log's `run:` line are a measured
+    fact ("'price' is empty on 75% of rows") rather than a sentence someone typed.
     """
     if not records:
         return "The collector returned no rows at all."
-    results = run_all_checks(baseline_profiles, records, baseline_count=baseline.record_count)
-    for r in results:
-        if not r.passed and r.code in _DEGRADATION_CODES:
+    verdict = verify_rows(
+        candidate_records=records,
+        baseline_profiles=baseline.field_profiles,
+        baseline_count=baseline.record_count,
+    ).verdict
+    for r in verdict.failures:
+        if r.code in _DEGRADATION_CODES:
             return r.message
     return None
 
@@ -112,10 +115,8 @@ def run_cycle_for_product(product: Product, baseline: Baseline, *,
     `simulate_run`  : demo hook (mock only) - e.g. 'run_degraded' to trigger a heal on real nulls
     `simulate_heal` : demo hook (mock only) - a fixture key, or a per-attempt sequence of them
     """
-    baseline_profiles = {k: FieldProfile.from_dict(v) for k, v in baseline.field_profiles.items()}
-
     records = brightdata.run(product.collector_id, product.competitor_url, _simulate=simulate_run)
-    trigger_reason = _degradation_reason(baseline, baseline_profiles, records)
+    trigger_reason = _degradation_reason(baseline, records)
 
     attempts: list[HealAttempt] = []
     source_confirmed = True
@@ -136,12 +137,16 @@ def run_cycle_for_product(product: Product, baseline: Baseline, *,
                 product.collector_id, prompt, product.competitor_url,
                 _simulate=_simulate_for_attempt(simulate_heal, attempt),
             )
-            verdict = _judge_if_ambiguous(
-                decide(run_all_checks(baseline_profiles, proposal.proposed_records,
-                                      baseline_count=baseline.record_count,
-                                      is_sample=proposal.is_sample)),
-                proposal.proposed_records,
-            )
+            # Same Trust API surface an external caller hits, with the repricer's own stored baseline
+            # and its server-configured judge key. verify_rows runs Tier 3 only on a REVIEW.
+            verdict = verify_rows(
+                candidate_records=proposal.proposed_records,
+                baseline_profiles=baseline.field_profiles,
+                baseline_count=baseline.record_count,
+                is_sample=proposal.is_sample,
+                use_judge=True,
+                llm_config=judge_config_from_settings(),
+            ).verdict
             committed = verdict.confirmed
 
             if committed:
@@ -206,18 +211,6 @@ def run_cycle_for_product(product: Product, baseline: Baseline, *,
         heal_attempts=attempts,
         counterfactual=counterfactual,
     )
-
-
-def _judge_if_ambiguous(verdict: Verdict, records: list[dict]) -> Verdict:
-    """Escalate to the Tier 3 semantic judge only when the cheap tiers could not decide.
-
-    A clean PASS needs no second opinion and a CRITICAL FAIL has already been decided, so REVIEW is
-    the only verdict worth spending an API call on. Outside MOCK_MODE with a key configured this is at
-    most one call per held cycle; mocked, it is a no-op.
-    """
-    if verdict.decision != REVIEW:
-        return verdict
-    return apply_judge(verdict, judge.judge_fields(records))
 
 
 # --------------------------------------------------------------------------------------
@@ -366,7 +359,7 @@ def _extract_competitor_price(product: Product, records: list[dict],
     worse than none: pricing against the wrong product is precisely the harm this product prevents.
     So the fuzzy pass must clear _MATCH_THRESHOLD and must be an unambiguous winner.
     """
-    from app.guardian.checks import _coerce_number
+    from app.parsing import coerce_number as _coerce_number
 
     target = _normalise(product.name)
     if not target:

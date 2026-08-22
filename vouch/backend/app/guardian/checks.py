@@ -25,6 +25,8 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Optional
 
+from app.parsing import coerce_number as _coerce_number
+
 
 # Below this many rows a median is an anecdote, not a distribution. Bright Data's heal gate returns a
 # preview SAMPLE - we have measured exactly 1 row against a 96-row baseline - so any check that reasons
@@ -79,19 +81,6 @@ class CheckResult:
 # --------------------------------------------------------------------------------------
 # Profiling
 # --------------------------------------------------------------------------------------
-
-def _coerce_number(v: Any) -> Optional[float]:
-    """Best-effort numeric parse: strips currency symbols, commas, whitespace."""
-    if v is None:
-        return None
-    if isinstance(v, (int, float)):
-        return float(v)
-    s = str(v).strip().replace(",", "").replace("$", "").replace("€", "").replace("£", "")
-    try:
-        return float(s)
-    except ValueError:
-        return None
-
 
 def _infer_dtype(values: list[Any]) -> str:
     non_null = [v for v in values if v not in (None, "")]
@@ -175,6 +164,34 @@ def check_null_rate(baseline: dict[str, FieldProfile], proposed: dict[str, Field
                 False, Severity.HIGH, name, "NULL_SPIKE",
                 f"'{name}' is empty on {prop.null_rate:.0%} of rows (was {base.null_rate:.0%}).",
                 {"baseline_null_rate": base.null_rate, "proposed_null_rate": prop.null_rate},
+            ))
+    return out
+
+
+def check_dtype_change(baseline: dict[str, FieldProfile], proposed: dict[str, FieldProfile]) -> list[CheckResult]:
+    """A field that silently changes type - numeric 'price' now returning 'See price in cart' strings.
+
+    This is a blind spot the distributional tier cannot see on its own: every numeric check
+    (drift, column-swap) requires BOTH sides to be numeric and simply skips a field once it stops
+    parsing as a number, so a price column turning to prose emits no finding at all. The values are
+    non-null, so NULL_SPIKE stays quiet too. An explicit type-regression check closes that gap, and
+    it works on a single preview row.
+
+    'unknown' (an all-null/empty column) is never compared - absence is NULL_SPIKE's and
+    FIELD_MISSING's job, not this one's.
+    """
+    out = []
+    for name, base in baseline.items():
+        prop = proposed.get(name)
+        if not prop or base.dtype == "unknown" or prop.dtype == "unknown":
+            continue
+        if base.dtype != prop.dtype:
+            out.append(CheckResult(
+                False, Severity.HIGH, name, "DTYPE_CHANGED",
+                f"'{name}' changed type from {base.dtype} to {prop.dtype} after the heal - "
+                f"the fix may be reading a different element entirely.",
+                {"baseline_dtype": base.dtype, "proposed_dtype": prop.dtype,
+                 "sample": prop.sample},
             ))
     return out
 
@@ -393,8 +410,8 @@ def check_value_ordering(records: list[dict],
         out.append(CheckResult(
             False, Severity.CRITICAL, lower_name, "VALUE_ORDER_INVERTED",
             f"'{lower_name}' is above '{upper_name}' on {rate:.0%} of rows "
-            f"(e.g. {example[0]:g} vs {example[1]:g}). A sale price cannot exceed the price it is "
-            f"discounted from - these two fields have almost certainly been swapped.",
+            f"(e.g. {example[0]:g} vs {example[1]:g}) - '{lower_name}' must never exceed "
+            f"'{upper_name}', so these two fields have almost certainly been swapped.",
             {"lower": lower_name, "upper": upper_name, "inverted_rate": rate,
              "rows_checked": len(pairs), "example_lower": example[0], "example_upper": example[1]},
         ))
@@ -406,7 +423,8 @@ def check_value_ordering(records: list[dict],
 # --------------------------------------------------------------------------------------
 
 def run_all_checks(baseline_profiles: dict[str, FieldProfile], proposed_records: list[dict],
-                   baseline_count: int, *, is_sample: bool = False) -> list[CheckResult]:
+                   baseline_count: int, *, is_sample: bool = False,
+                   orderings: Optional[list[tuple[str, str]]] = None) -> list[CheckResult]:
     """Run the deterministic tiers (1 + 2).
 
     Returns one CheckResult per FAILURE. Checks do not emit a result when they pass, so a
@@ -418,9 +436,15 @@ def run_all_checks(baseline_profiles: dict[str, FieldProfile], proposed_records:
     ROW_COUNT_SHIFT and CARDINALITY_COLLAPSE stand down entirely, and the distributional checks stand
     down when there are too few rows for a median to mean anything.
 
+    `orderings` are the (lower, upper) invariant pairs the value-ordering tier enforces. It defaults
+    to FIELD_ORDERINGS (the repricer's price/original_price schema); a caller with a different schema
+    - the whole point of the public /verify surface - passes its own so the check is not pinned to
+    e-commerce prices.
+
     What still works on a one-row preview, and why it is enough to gate on:
       FIELD_MISSING          - a dropped field is visible in a single row
       NULL_SPIKE             - so is an empty one
+      DTYPE_CHANGED          - a type regression shows in the first row's value
       COLUMN_SWAP            - asks which distribution the values sit ON, not how they are spread
       VALUE_ORDER_INVERTED   - a row-wise invariant; one row is a complete test of it
     """
@@ -430,6 +454,7 @@ def run_all_checks(baseline_profiles: dict[str, FieldProfile], proposed_records:
     results: list[CheckResult] = []
     results += check_field_presence(baseline_profiles, proposed_profiles)
     results += check_null_rate(baseline_profiles, proposed_profiles)
+    results += check_dtype_change(baseline_profiles, proposed_profiles)
     if not is_sample:
         results += check_record_count(baseline_count, len(proposed_records))
         results += check_cardinality_collapse(baseline_profiles, proposed_profiles)
@@ -437,7 +462,7 @@ def run_all_checks(baseline_profiles: dict[str, FieldProfile], proposed_records:
         results += check_numeric_drift(baseline_profiles, proposed_profiles)
     results += check_column_swap(baseline_profiles, proposed_profiles)
     results += check_bool_ratio(baseline_profiles, proposed_profiles)
-    results += check_value_ordering(proposed_records)
+    results += check_value_ordering(proposed_records, orderings)
 
     if not results:
         results.append(CheckResult(True, Severity.LOW, "__run__", "OK",

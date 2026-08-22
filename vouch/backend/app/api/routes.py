@@ -9,7 +9,6 @@ there is never a second implementation of a rule hiding in a request handler.
 from __future__ import annotations
 
 import json
-from pathlib import Path
 from typing import Optional
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Query
@@ -19,9 +18,6 @@ from app import service
 from app.api import schemas
 from app.config import settings
 from app.db import session_dep
-from app.guardian import judge as guardian_judge
-from app.guardian.checks import FieldProfile, run_all_checks
-from app.guardian.verdict import REVIEW, apply_judge, decide
 from app.models import (
     Baseline,
     CompetitorObservation,
@@ -34,10 +30,6 @@ from app.scraper import baseline as baseline_capture
 from app.scraper.brightdata import fixture_path
 
 router = APIRouter()
-
-# Profiling is O(rows x fields); /verify is a public, unauthenticated surface, so both caller-supplied
-# lists are capped rather than left to consume unbounded CPU. Well above any real preview or baseline.
-MAX_VERIFY_ROWS = 5000
 
 
 def _fixture_keys() -> set[str]:
@@ -94,89 +86,6 @@ _DATASET_NOTES = {
 def _fail(err: service.ServiceError):
     raise HTTPException(status_code=err.status_code,
                         detail={"detail": err.message, **err.detail})
-
-
-# --------------------------------------------------------------------------------------
-# trust layer - the stateless verdict primitive
-# --------------------------------------------------------------------------------------
-
-@router.post("/verify", response_model=schemas.VerifyResponse)
-def verify(body: schemas.VerifyRequest = Body(...)):
-    """Run the guardian over caller-supplied rows and return the raw verdict - nothing else.
-
-    This is the trust layer laid bare: no product, no baseline row, no pricing, no writes. It is the
-    same pure pipeline the orchestrator runs internally (run_all_checks -> decide -> apply_judge),
-    exposed so any pipeline can gate on Vouch's confidence score and risk brief without adopting the
-    repricer. Because it touches no database it takes no session dependency.
-    """
-    if not body.candidate_records:
-        raise HTTPException(422, detail={"detail": "candidate_records must be non-empty"})
-    if len(body.candidate_records) > MAX_VERIFY_ROWS:
-        raise HTTPException(422, detail={
-            "detail": f"candidate_records exceeds the {MAX_VERIFY_ROWS}-row limit"})
-    if body.baseline_records is not None and len(body.baseline_records) > MAX_VERIFY_ROWS:
-        raise HTTPException(422, detail={
-            "detail": f"baseline_records exceeds the {MAX_VERIFY_ROWS}-row limit"})
-
-    has_records = body.baseline_records is not None
-    has_profiles = body.baseline_profiles is not None
-    if has_records == has_profiles:
-        raise HTTPException(422, detail={
-            "detail": "provide exactly one of baseline_records or baseline_profiles"})
-
-    # Build the baseline profiles the checks compare against, from whichever shape was given.
-    if has_records:
-        serialized, inferred_count = baseline_capture.capture(body.baseline_records)
-    else:
-        serialized = body.baseline_profiles
-
-    # from_dict does cls(**d), so a caller-supplied profile with wrong/missing keys would raise a
-    # TypeError and escape as a 500. This endpoint ingests arbitrary caller data, so a malformed
-    # profile is a client error - surface it as 422.
-    try:
-        baseline_profiles = {name: FieldProfile.from_dict(prof) for name, prof in serialized.items()}
-    except (TypeError, ValueError) as exc:
-        raise HTTPException(422, detail={"detail": f"malformed baseline_profiles: {exc}"})
-
-    # Infer the baseline row count when the caller omits it, from EITHER shape: len(records) on the
-    # raw path, the profiles' own count on the precomputed path. Defaulting to 0 would silently
-    # no-op check_record_count and hide a ROW_COUNT_SHIFT.
-    if body.baseline_count is not None:
-        baseline_count = body.baseline_count
-    elif has_records:
-        baseline_count = inferred_count
-    else:
-        baseline_count = max((p.count for p in baseline_profiles.values()), default=0)
-
-    results = run_all_checks(baseline_profiles, body.candidate_records, baseline_count,
-                             is_sample=body.is_sample)
-    verdict = decide(results)
-
-    judge_consulted = False
-    # TODO: a non-mock deployment must add auth + rate-limiting before enabling the paid Tier 3 judge
-    # on this public endpoint - use_judge currently only reaches a no-op judge under MOCK_MODE.
-    if body.use_judge and verdict.decision == REVIEW:
-        judge_result = guardian_judge.judge_fields(body.candidate_records)
-        verdict = apply_judge(verdict, judge_result)
-        judge_consulted = judge_result.consulted
-
-    return schemas.VerifyResponse(
-        decision=verdict.decision,
-        confirmed=verdict.confirmed,
-        confidence=verdict.confidence,
-        brief=verdict.brief,
-        failures=[
-            schemas.VerifyFailure(
-                code=f.code,
-                severity=f.severity.value,
-                field=f.field_name,
-                message=f.message,
-                evidence=f.evidence,
-            )
-            for f in verdict.failures
-        ],
-        judge_consulted=judge_consulted,
-    )
 
 
 # --------------------------------------------------------------------------------------

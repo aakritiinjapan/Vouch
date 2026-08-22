@@ -4,9 +4,12 @@ uvicorn[standard]>=0.32
 sqlmodel>=0.0.22
 pydantic-settings>=2.5
 
-# Tier 3 LLM judge (guardian/judge.py). Optional at runtime: without ANTHROPIC_API_KEY the
-# judge short-circuits and the deterministic tiers stand on their own.
+# Tier 3 LLM judge (guardian/judge.py) - provider-agnostic, bring-your-own-key. Both SDKs are
+# optional at runtime: with no usable LLMConfig the judge short-circuits and the deterministic tiers
+# stand on their own. Anthropic is the default provider; openai also reaches any OpenAI-compatible
+# endpoint via base_url.
 anthropic>=0.40
+openai>=1.50
 
 # Tests
 pytest>=8.3

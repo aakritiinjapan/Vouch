@@ -25,3 +25,8 @@ dist/
 .demo-ui.log
 CLAUDE.md
 scratchpad/
+
+# Scratch / capture artifacts
+pages_sc/
+.playwright-mcp/
+.githooks/*

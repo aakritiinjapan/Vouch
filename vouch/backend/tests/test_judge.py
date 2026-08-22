@@ -12,10 +12,14 @@ import pytest
 
 from app.guardian import judge
 from app.guardian.checks import CheckResult, Severity
-from app.guardian.judge import JudgeResult
+from app.guardian.judge import JudgeResult, LLMConfig
 from app.guardian.verdict import FAIL, PASS, REVIEW, apply_judge, decide
 
 ROWS = [{"name": "MSI RTX 5080", "price": 1299.99, "shipping": 19.99}]
+
+
+def _config(provider: str = "anthropic", key: str = "sk-test", enabled: bool = True) -> LLMConfig:
+    return LLMConfig(provider=provider, api_key=key, model="test-model", enabled=enabled)
 
 
 def _review_from(code: str, field_name: str = "price") -> object:
@@ -129,11 +133,11 @@ def test_the_worst_field_drives_the_decision():
 
 
 # --------------------------------------------------------------------------------------
-# judge_fields short-circuits
+# judge_fields short-circuits - bring-your-own-key: no usable config, no call
 # --------------------------------------------------------------------------------------
 
-def test_mock_mode_never_calls_out(monkeypatch):
-    monkeypatch.setattr(judge.settings, "mock_mode", True)
+def test_no_config_never_calls_out():
+    """The demo path and any public caller who brought no key: deterministic-only, no call."""
     result = judge.judge_fields(ROWS)
 
     assert result.consulted is False
@@ -141,41 +145,37 @@ def test_mock_mode_never_calls_out(monkeypatch):
     assert "not consulted" in result.notes
 
 
-def test_a_missing_api_key_short_circuits(monkeypatch):
-    monkeypatch.setattr(judge.settings, "mock_mode", False)
-    monkeypatch.setattr(judge.settings, "anthropic_api_key", "")
-    assert judge.judge_fields(ROWS).consulted is False
+def test_a_disabled_config_short_circuits():
+    """A key can be present but the caller (e.g. the mocked demo) forces deterministic-only."""
+    assert judge.judge_fields(ROWS, config=_config(enabled=False)).consulted is False
 
 
-def test_only_fields_present_in_the_data_are_judged(monkeypatch):
+def test_a_missing_api_key_short_circuits():
+    assert judge.judge_fields(ROWS, config=_config(key="")).consulted is False
+
+
+def test_only_fields_present_in_the_data_are_judged():
     """No point asking about a field the collector does not return."""
-    monkeypatch.setattr(judge.settings, "mock_mode", True)
     result = judge.judge_fields([{"price": 1.0}])
     assert set(result.field_scores) == {"price"}
 
 
 def test_an_sdk_failure_is_swallowed_into_not_consulted(monkeypatch):
     """Tier 3 is a bonus. It must never be able to break a cycle."""
-    monkeypatch.setattr(judge.settings, "mock_mode", False)
-    monkeypatch.setattr(judge.settings, "anthropic_api_key", "sk-test")
-
     import anthropic
 
     def explode(*_args, **_kwargs):
         raise RuntimeError("network down")
 
     monkeypatch.setattr(anthropic, "Anthropic", explode)
-    result = judge.judge_fields(ROWS)
+    result = judge.judge_fields(ROWS, config=_config())
 
     assert result.consulted is False
     assert "judge unavailable" in result.notes
 
 
 def test_scores_are_derived_from_the_structured_response(monkeypatch):
-    """Verifies the parse path end to end without a network call."""
-    monkeypatch.setattr(judge.settings, "mock_mode", False)
-    monkeypatch.setattr(judge.settings, "anthropic_api_key", "sk-test")
-
+    """Verifies the Anthropic parse path end to end without a network call."""
     import anthropic
 
     class FakeMessages:
@@ -193,7 +193,7 @@ def test_scores_are_derived_from_the_structured_response(monkeypatch):
             self.messages = FakeMessages()
 
     monkeypatch.setattr(anthropic, "Anthropic", FakeClient)
-    result = judge.judge_fields(ROWS)
+    result = judge.judge_fields(ROWS, config=_config())
 
     assert result.consulted is True
     assert result.field_scores == {"price": 0.3, "shipping": 1.0}
@@ -201,10 +201,36 @@ def test_scores_are_derived_from_the_structured_response(monkeypatch):
     assert result.reasons["price"] == "these are shipping costs"
 
 
-def test_a_zero_total_cannot_divide_by_zero(monkeypatch):
-    monkeypatch.setattr(judge.settings, "mock_mode", False)
-    monkeypatch.setattr(judge.settings, "anthropic_api_key", "sk-test")
+def test_the_openai_provider_path_is_used_when_selected(monkeypatch):
+    """Provider-agnostic: an openai config routes through the OpenAI-compatible transport."""
+    import openai
 
+    class FakeCompletions:
+        def parse(self, **_kwargs):
+            class Msg:
+                parsed = judge._Assessment(fields=[
+                    judge._FieldAssessment(field_name="price", correct=2, total=10, reason="wrong")])
+
+            class Choice:
+                message = Msg()
+
+            class Response:
+                choices = [Choice()]
+            return Response()
+
+    class FakeClient:
+        def __init__(self, **_kwargs):
+            self.beta = type("B", (), {"chat": type("C", (), {"completions": FakeCompletions()})()})()
+
+    monkeypatch.setattr(openai, "OpenAI", FakeClient)
+    result = judge.judge_fields(ROWS, config=_config(provider="openai"))
+
+    assert result.consulted is True
+    assert result.field_scores == {"price": 0.2}
+    assert "openai" in result.notes
+
+
+def test_a_zero_total_cannot_divide_by_zero(monkeypatch):
     import anthropic
 
     class FakeClient:
@@ -221,4 +247,4 @@ def test_a_zero_total_cannot_divide_by_zero(monkeypatch):
             self.messages = Messages()
 
     monkeypatch.setattr(anthropic, "Anthropic", FakeClient)
-    assert judge.judge_fields(ROWS).field_scores == {"price": 0.0}
+    assert judge.judge_fields(ROWS, config=_config()).field_scores == {"price": 0.0}
