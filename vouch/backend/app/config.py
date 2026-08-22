@@ -46,7 +46,14 @@ class Settings(BaseSettings):
     # Set whichever you have; the CLI also reads its own credential store after `brightdata login`.
     brightdata_api_key: str = ""                 # required only when mock_mode is false
     brightdata_api_token: str = ""               # required only when mock_mode is false
-    anthropic_api_key: str = ""                  # required only for the LLM judge (Phase 3)
+
+    # The Tier 3 judge is provider-agnostic and bring-your-own-key (see app/guardian/judge.py).
+    # These settings drive the INTERNAL repricer cycle only; the public /verify endpoint takes the
+    # caller's key from the X-LLM-Key header instead and never touches these.
+    llm_provider: str = "anthropic"              # "anthropic" | "openai" (OpenAI-compatible)
+    llm_api_key: str = ""                         # generic; falls back to anthropic_api_key below
+    llm_base_url: str = ""                        # for OpenAI-compatible endpoints
+    anthropic_api_key: str = ""                  # back-compat alias for the judge key
     llm_judge_model: str = "claude-sonnet-4-6"
 
 

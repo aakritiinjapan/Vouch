@@ -41,12 +41,17 @@ describe("TrustApi", () => {
     expect(screen.getByText("200")).toBeInTheDocument();
   });
 
-  it("re-runs verify when the scenario changes", async () => {
+  it("loads a preset without running, then runs on the button click", async () => {
     render(<TrustApi />);
-    await waitFor(() => expect(verify).toHaveBeenCalled());
+    await waitFor(() => expect(verify).toHaveBeenCalled()); // auto-run once on mount
     verify.mockClear();
 
-    await userEvent.click(screen.getByRole("radio", { name: /clean heal/i }));
+    // Selecting a preset must NOT run — it only loads the request JSON.
+    await userEvent.click(screen.getByRole("button", { name: /clean heal/i }));
+    expect(verify).not.toHaveBeenCalled();
+
+    // The button is what runs it.
+    await userEvent.click(screen.getByRole("button", { name: /run through the guardian/i }));
     await waitFor(() => expect(verify).toHaveBeenCalled());
     const arg = verify.mock.calls.at(-1)![0];
     expect(Array.isArray(arg.candidate_records)).toBe(true);

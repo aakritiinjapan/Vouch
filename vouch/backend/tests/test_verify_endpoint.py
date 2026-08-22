@@ -186,14 +186,14 @@ def test_malformed_baseline_profiles_is_422(client, runs, bad):
 # --------------------------------------------------------------------------------------
 
 def test_oversized_candidate_records_is_422(client, runs):
-    from app.api.routes import MAX_VERIFY_ROWS
+    from app.api.trust_routes import MAX_VERIFY_ROWS
     huge = [dict(runs["baseline"][0]) for _ in range(MAX_VERIFY_ROWS + 1)]
     status, payload = _verify(client, candidate_records=huge, baseline_records=runs["baseline"])
     assert status == 422, payload
 
 
 def test_oversized_baseline_records_is_422(client, runs):
-    from app.api.routes import MAX_VERIFY_ROWS
+    from app.api.trust_routes import MAX_VERIFY_ROWS
     huge = [dict(runs["baseline"][0]) for _ in range(MAX_VERIFY_ROWS + 1)]
     status, payload = _verify(client, candidate_records=runs["baseline"], baseline_records=huge)
     assert status == 422, payload

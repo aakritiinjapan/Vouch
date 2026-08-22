@@ -68,7 +68,7 @@ def test_a_sale_original_swap_fails_the_whole_battery():
     verdict = decide(run_all_checks(profile_run(GOOD), SWAPPED, baseline_count=len(GOOD)))
     assert verdict.decision == FAIL
     assert verdict.primary_failure.code == "VALUE_ORDER_INVERTED"
-    assert "cannot exceed" in verdict.brief
+    assert "must never exceed" in verdict.brief
 
 
 def test_correctly_ordered_prices_pass_cleanly():
