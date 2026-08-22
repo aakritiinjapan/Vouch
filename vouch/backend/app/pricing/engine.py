@@ -1,8 +1,7 @@
 """
-Repricing rules. Deliberately simple for the hackathon — the intelligence is in the guardian,
-not here. The one rule that matters: never propose a price that breaks the floor margin.
-
-Claude Code: extend with strategy (undercut by X, match, hold) as time allows, but keep the floor.
+Repricing rules. Deliberately simple — the intelligence is in the guardian, not here, and the
+repricer is only the Trust API's reference consumer. The one rule that matters: never propose a
+price that breaks the floor margin.
 """
 
 from __future__ import annotations

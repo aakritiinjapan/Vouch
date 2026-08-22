@@ -5,14 +5,14 @@ Three minutes, not five. Judges watch a lot of these, and the arc lands harder t
 The arc follows the product: **the verdict is the product; the repricer is where it obviously
 matters.** So we open on the verdict idea, immediately prove the data underneath it is real, show
 the guardian catch a silent lie, and then reveal the verdict as a standalone thing anything can
-call. See [PRODUCT.md](../../PRODUCT.md) for positioning and [AS-IS.md](../../AS-IS.md) for what is
+call. See [PRODUCT.md](PRODUCT.md) for positioning and [AS-IS.md](AS-IS.md) for what is
 actually built (so no claim here outruns the code).
 
 Two windows: a terminal with real CLI output (captured in advance — see
 [`LIVE_CAPTURE.md`](LIVE_CAPTURE.md)) and the app at `http://127.0.0.1:5173` (Hero → Console →
 Trust API views).
 
-> UI element names below track [UI_PLAN.md](../../UI_PLAN.md). Give the script one final pass once
+> UI element names below track [UI_PLAN.md](UI_PLAN.md). Give the script one final pass once
 > the redesign lands, in case a label moved.
 
 ---
@@ -40,7 +40,7 @@ Don't linger. The hero states the thesis; the terminal proves it.
 Cut to the terminal. Real `scraper run` output scrolling — 96 graphics cards, names, prices,
 shipping, stock.
 
-> "Ninety-six cards off Newegg's public category page, one request — a DataVerse Scraper Studio collector we
+> "Ninety-six cards off Newegg's public category page, one request — a Bright Data Scraper Studio collector we
 > built."
 
 ## 0:40 — The heal stops at the gate (30s) — the most important beat
@@ -63,7 +63,7 @@ Say the honest thing once, early, then move on:
 > "This particular failure is a captured scenario replayed offline — we can't make Newegg redesign on
 > cue. The data is their real data; the guardian running on it is the real guardian."
 
-A held decision appears with its **Verdict Seal**. Read it:
+A held decision appears with its **verdict gauge**. Read it:
 
 ```
    MSI RTX 5090 · vs Newegg
@@ -112,7 +112,7 @@ On the held card, click **`view as API →`**. It opens the **Trust API** view o
 > "Scraper Studio keeps the data flowing when a site changes. Vouch makes sure it didn't quietly
 > start lying — a trust layer for any scraped-data pipeline. Repricing today; branded catalogs next."
 
-End on the Verdict Seal, or the collector id.
+End on the verdict gauge, or the collector id.
 
 ---
 

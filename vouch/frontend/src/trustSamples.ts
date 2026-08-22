@@ -11,13 +11,17 @@
 
 export type Row = Record<string, unknown>;
 
-export type ScenarioKey = "column-swap" | "clean" | "crossed-out";
+export type ScenarioKey = "column-swap" | "clean" | "crossed-out" | "jobs-swap";
 
 export interface Scenario {
   key: ScenarioKey;
   label: string;
   blurb: string;
   candidate: Row[];
+  /** Defaults to the price BASELINE. A non-price scenario brings its own reference. */
+  baseline?: Row[];
+  /** Caller-supplied invariant pairs — the "bring your own schema" knob. */
+  orderings?: [string, string][];
 }
 
 // Last-known-good reference the candidate is judged against.
@@ -65,6 +69,27 @@ const HEALED_SWAPPED_ORIGINAL: Row[] = [
   { name: "MSI RTX 5070 Ventus 3X", price: 729.99, shipping: 18.5, rating: 4.1, in_stock: false, original_price: 629.99 },
 ];
 
+// A NON-price schema, to prove the endpoint isn't pinned to e-commerce. A jobs feed whose heal
+// swapped min/max salary; the ranges overlap, so distributions can't tell — only the caller's own
+// `orderings` invariant (min_salary ≤ max_salary) catches it. All salaries in $k.
+const JOBS_BASELINE: Row[] = [
+  { role: "Backend Engineer", min_salary: 120, max_salary: 160 },
+  { role: "Data Analyst", min_salary: 90, max_salary: 120 },
+  { role: "Product Manager", min_salary: 130, max_salary: 170 },
+  { role: "Designer", min_salary: 100, max_salary: 135 },
+  { role: "Site Reliability Eng", min_salary: 140, max_salary: 180 },
+  { role: "Recruiter", min_salary: 80, max_salary: 110 },
+];
+
+const JOBS_SWAPPED: Row[] = [
+  { role: "Backend Engineer", min_salary: 160, max_salary: 120 },
+  { role: "Data Analyst", min_salary: 120, max_salary: 90 },
+  { role: "Product Manager", min_salary: 170, max_salary: 130 },
+  { role: "Designer", min_salary: 135, max_salary: 100 },
+  { role: "Site Reliability Eng", min_salary: 180, max_salary: 140 },
+  { role: "Recruiter", min_salary: 110, max_salary: 80 },
+];
+
 export const SCENARIOS: Scenario[] = [
   {
     key: "column-swap",
@@ -83,6 +108,14 @@ export const SCENARIOS: Scenario[] = [
     label: "Crossed-out (was) price",
     blurb: "The heal read the crossed-out ORIGINAL price (~14% off — only the ordering invariant sees it).",
     candidate: HEALED_SWAPPED_ORIGINAL,
+  },
+  {
+    key: "jobs-swap",
+    label: "Jobs feed · your own schema",
+    blurb: "No price columns at all — a jobs feed with min/max salary swapped. Your own `orderings` invariant catches it.",
+    candidate: JOBS_SWAPPED,
+    baseline: JOBS_BASELINE,
+    orderings: [["min_salary", "max_salary"]],
   },
 ];
 

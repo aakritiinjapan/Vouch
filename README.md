@@ -1,6 +1,11 @@
 # Vouch
 
-**A repricing copilot that never acts on a number it can't verify.**
+**A trust layer for scraped data — so an automated decision never acts on a number it can't verify.**
+
+The product is one stateless call, `POST /verify`: hand it the rows a self-heal wants to commit, get
+back a verdict — PASS / REVIEW / FAIL, a 0–100 confidence score, and a plain-English brief — that any
+pipeline can gate on. The repricing console in this repo is its **first consumer**, the proof of what
+the verdict looks like in a real product.
 
 Built for [Into the Scrape-Verse](https://www.wemakedevs.org/hackathons/scrape-verse) (Bright Data ×
 WeMakeDevs), 17–23 August 2026.
@@ -11,12 +16,12 @@ WeMakeDevs), 17–23 August 2026.
 > Real output: [`vouch/docs/sample_output.json`](vouch/docs/sample_output.json) ·
 > A real heal captured at the approval gate: [`vouch/docs/live_heal_vague.json`](vouch/docs/live_heal_vague.json)
 
-![The Vouch console with three reprices held. A ZOTAC RTX 5090 shows −$951.00 per unit of margin
-protected, because the healed price of $19.99 matched the competitor's shipping column rather than
-their item price.](vouch/docs/screenshot-held.png)
+![The Vouch Trust API tab judging a healed scrape live: a column-swapped heal is sent to
+POST /verify and comes back decision FAIL, confidence 40, with COLUMN_SWAP in the failures. The
+request body is editable, and the scenarios include a non-price schema.](vouch/docs/screenshot-trust-api.png)
 
-<sub>Three held decisions on real Newegg data. With every source confirmed, the same console is
-quiet — see [`screenshot-confirmed.png`](vouch/docs/screenshot-confirmed.png).</sub>
+<sub>The product: one stateless `POST /verify` any pipeline can gate on — bring your own rows, schema,
+and (optional) model key. The repricer further down is its first consumer.</sub>
 
 ---
 
@@ -35,6 +40,65 @@ no Bright Data or Anthropic credentials required.
 Prerequisites: Python 3.11+, Node 20+. `make demo` does the same thing if you prefer.
 
 ---
+
+## The product: a Trust API any pipeline can call
+
+`POST /verify` is stateless — no database, no repricing, no writes. It's a thin adapter over
+`verify_rows` (`run_all_checks → decide → apply_judge`) — **the exact same function the repricer
+calls** — over rows you supply, returning the raw verdict. Because 5,000 hackathon teams just built
+self-healing scrapers and none of them can answer *"did the heal silently break my data?"*, this is
+the piece meant to be dropped into someone else's project.
+
+```bash
+curl -X POST "$VOUCH/verify" \
+  -H 'content-type: application/json' \
+  -d '{
+    "candidate_records": [ { "price": 19.99, "shipping": 6900.00 } ],
+    "baseline_records":  [ { "price": 6900.00, "shipping": 19.99 } ],
+    "is_sample": true
+  }'
+# → { "decision": "fail", "confirmed": false, "confidence": 40,
+#     "brief": "Rejected this heal. 'price' now matches the baseline distribution of 'shipping'…",
+#     "failures": [ { "code": "COLUMN_SWAP", … } ], "judge_consulted": false }
+```
+
+**It is not pinned to e-commerce.** Bring your own schema and your own model:
+
+- `orderings` — your invariant pairs, e.g. `[["min_salary","max_salary"]]`, so the ordering tier
+  guards *your* columns, not `price`/`original_price`.
+- `field_descriptions` — what each field is supposed to mean, for the optional semantic judge.
+- **Bring-your-own-key judge.** The paid Tier 3 judge runs only when you set `"use_judge": true`
+  **and** pass your own key in the `X-LLM-Key` header. `llm.provider` is `"anthropic"` or `"openai"`
+  (the latter also reaches any OpenAI-compatible endpoint via `llm.base_url`). No key → the judge is
+  a no-op and the free deterministic tiers stand on their own. Vouch never spends its own tokens on
+  your call.
+
+```bash
+curl -X POST "$VOUCH/verify" \
+  -H 'content-type: application/json' \
+  -H "X-LLM-Key: $YOUR_MODEL_KEY" \
+  -d '{ "candidate_records": [...], "baseline_records": [...],
+        "use_judge": true, "llm": { "provider": "anthropic" },
+        "field_descriptions": { "price": "the nightly room rate in USD" } }'
+```
+
+The verdict schema, the full request contract, and every check code are the interactive **Trust API**
+tab in the dashboard. The Trust API has its own OpenAPI docs at **`/trust/docs`** (a standalone
+sub-app that exposes *only* `/verify`), so an integrator never wades past the repricer's endpoints.
+
+---
+
+## The first consumer: the repricer
+
+The console below is what the verdict looks like wired into a real product — a repricer that holds
+any price move it can't stand behind. Everything from here down is that consumer.
+
+![The Vouch console with three reprices held. A ZOTAC RTX 5090 shows −$951.00 per unit of margin
+protected, because the healed price of $19.99 matched the competitor's shipping column rather than
+their item price.](vouch/docs/screenshot-held.png)
+
+<sub>Three held decisions on real Newegg data. With every source confirmed, the same console is
+quiet — see [`screenshot-confirmed.png`](vouch/docs/screenshot-confirmed.png).</sub>
 
 ## The problem
 
@@ -120,15 +184,15 @@ underpricing destroys margin, overpricing loses the sale. The counterfactual nam
 ```
   competitor        ┌──────────────────────── Vouch ────────────────────────┐
   site ────────────▶│                                                        │
-                    │  orchestrator.py — the scrape → guard → price loop      │
+                    │  orchestrator.py — scrape → verify → price loop         │
   Bright Data       │       │                                                │
   Scraper Studio ◀─▶│       ├─▶ scraper/brightdata.py   run/heal/approve      │
   (heal loop)       │       │                                                │
-                    │       ├─▶ guardian/   ◀── the differentiated core       │
-                    │       │     checks.py   tiered validation               │
-                    │       │     judge.py    LLM-as-judge, REVIEW only       │
-                    │       │     verdict.py  confidence + risk brief         │
-                    │       │                                                │
+                    │       ├─▶ trust/verify.py ── verify_rows()  ◀ POST /verify
+                    │       │     └─▶ guardian/   (encapsulated core)         │
+                    │       │           checks.py   tiered validation         │
+                    │       │           judge.py    LLM judge, REVIEW only    │
+                    │       │           verdict.py  confidence + risk brief   │
                     │       └─▶ pricing/engine.py   propose a new price       │
                     │                 │                                      │
                     │           service.py — the only module that writes      │
@@ -137,8 +201,12 @@ underpricing destroys margin, overpricing loses the sale. The counterfactual nam
                     └────────────────────────────────────────────────────────┘    (decision queue)
 ```
 
-Three properties are load-bearing:
+The repricer and every external caller enter through the **same** `verify_rows()` boundary; the
+guardian is reached only through it. Four properties are load-bearing:
 
+- **One trust boundary, two entry points.** `POST /verify` is a thin HTTP adapter over `verify_rows`,
+  and the repricer's orchestrator calls that identical function — so the repricer is a genuine
+  consumer of the Trust API, not a second implementation, and `guardian/` stays private behind it.
 - **`orchestrator.py` is pure.** It opens no session and commits nothing; `service.py` is the only
   module that writes rows. That's why the entire cycle — including the retry loop — is testable
   against unsaved objects with no database at all.
@@ -182,7 +250,7 @@ The console runs entirely offline: no CDN fonts, no external requests, no teleme
 ## Tests
 
 ```bash
-cd vouch/backend && pytest -q     # 181 tests
+cd vouch/backend && pytest -q     # 210 tests
 ```
 
 The suite covers the guardian's four tiers, the orchestrator's retry loop with no database, the
@@ -256,15 +324,17 @@ Vouch/
 └── vouch/
     ├── backend/
     │   ├── app/
-    │   │   ├── orchestrator.py   the scrape → guard → price loop (pure)
+    │   │   ├── trust/verify.py   the ONE verify boundary (verify_rows) — the Trust API core
+    │   │   ├── orchestrator.py   scrape → verify → price loop (pure; verifies via trust/)
     │   │   ├── service.py        the only module that writes rows
-    │   │   ├── guardian/         checks.py · judge.py · verdict.py
+    │   │   ├── guardian/         checks.py · judge.py · verdict.py (reached only via trust/)
+    │   │   ├── llm.py            server-settings → LLMConfig, for the internal cycle only
     │   │   ├── pricing/engine.py floor-margin-respecting price proposals
     │   │   ├── scraper/          brightdata.py (CLI wrapper) · baseline.py
-    │   │   ├── api/              routes.py · schemas.py
+    │   │   ├── api/              routes.py (POST /verify + REST) · schemas.py
     │   │   └── models.py         Product · Baseline · RepriceProposal · HealEvent
     │   ├── scripts/              seed · reset_db · create_collector · live_heal
-    │   └── tests/                181 tests
+    │   └── tests/                210 tests
     ├── frontend/                 React + Vite + TypeScript dashboard
     └── docs/
         ├── BRIGHT_DATA_NOTES.md  Scraper Studio traps, measured against the live API

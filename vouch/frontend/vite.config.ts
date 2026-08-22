@@ -13,6 +13,9 @@ export default defineConfig({
         changeOrigin: true,
         rewrite: (path) => path.replace(/^\/api/, ""),
       },
+      // So the Trust API page's "OpenAPI docs" link (the standalone /trust/docs, which shows ONLY
+      // /verify) works same-origin in dev.
+      "/trust": { target: "http://127.0.0.1:8000", changeOrigin: true },
     },
   },
   test: {

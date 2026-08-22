@@ -26,7 +26,6 @@ from typing import Iterable, Optional
 
 from sqlmodel import Session, select
 
-from app.guardian.verdict import Verdict
 from app.models import (
     Baseline,
     CompetitorObservation,
