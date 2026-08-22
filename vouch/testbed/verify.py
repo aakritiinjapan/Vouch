@@ -46,7 +46,13 @@ EXPECTED: dict[str, str | None] = {
     "collapse": "CARDINALITY_COLLAPSE",
     "instock":  "BOOL_RATIO_SHIFT",
     "drift":    "NUMERIC_DRIFT",
+    "fake_sale": "REFERENCE_PRICE_UNSUPPORTED",
 }
+
+# Variants where a PASS verdict is the correct outcome, not a gap in the scoring policy. The heal is
+# sound - we read the page exactly as written - and the finding is about what the SITE claims. Holding
+# the repair for that would reject a good extraction for something it did not cause.
+PASS_BY_DESIGN = {"fake_sale"}
 
 _ITEM = re.compile(r'<li class="item">(.*?)</li>', re.S)
 _TITLE = re.compile(r'<a class="item-title"[^>]*>(.*?)</a>', re.S)
@@ -115,10 +121,17 @@ def main(argv: list[str] | None = None) -> int:
     failures = 0
     passes_anyway: list[tuple[str, str, int]] = []
 
+    # What the clean page charged, per product. This IS the pre-sale record: in production it comes
+    # from the confirmed CompetitorObservation rows, here from the page we captured the baseline off.
+    # Passing it only to the sale variant mirrors reality - an ordinary heal has no sale to audit.
+    before_sale = {r["name"]: r["price"] for r in clean_rows
+                   if r.get("name") and r.get("price") is not None}
+
     for variant in VARIANTS:
         rows = apply_variant(base_rows(), variant)
         parsed = parse(render(rows, variant))
-        verdict = decide(run_all_checks(baseline, parsed, baseline_count))
+        refs = before_sale if variant == "fake_sale" else None
+        verdict = decide(run_all_checks(baseline, parsed, baseline_count, reference_prices=refs))
 
         want_code = EXPECTED[variant]
         codes = {f.code for f in verdict.failures}
@@ -128,8 +141,11 @@ def main(argv: list[str] | None = None) -> int:
         failures += 0 if ok else 1
 
         # A break that trips its check but still scores PASS is not a page bug - it is the scoring
-        # policy declining to hold on this evidence. Worth surfacing rather than burying.
-        if want_code is not None and ok and verdict.decision == "pass":
+        # policy declining to hold on this evidence. Worth surfacing rather than burying. fake_sale is
+        # excluded because PASS is its DESIGNED outcome: the extraction is correct and the finding is
+        # about the site's claim, so rejecting the heal would punish a good repair.
+        if (want_code is not None and ok and verdict.decision == "pass"
+                and variant not in PASS_BY_DESIGN):
             passes_anyway.append((variant, want_code, verdict.confidence))
 
         mark = "OK  " if ok else "FAIL"

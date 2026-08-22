@@ -402,15 +402,119 @@ def check_value_ordering(records: list[dict],
 
 
 # --------------------------------------------------------------------------------------
+# Tier 2d - claims about the past (the only check that is not about our own extraction)
+# --------------------------------------------------------------------------------------
+
+# Every other check in this module asks: did OUR scrape stop meaning what it meant? This one asks
+# something different - is the SITE'S claim about its own past supported by what we recorded?
+#
+# It exists because of when scrapers break. A retailer relayouts its product pages for a sale, the
+# extraction breaks on the new markup, and a heal repairs it. That is the ordinary loop. But the sale
+# page also introduces a NEW claim - "was $1,271.99" - and the only party who can check it is one who
+# was already watching before the sale began. A crossed-out number is unfalsifiable at the moment you
+# read it; it is only checkable against a dated record.
+#
+# So this needs no price history beyond one confirmed observation per product from before the sale,
+# which is exactly what CompetitorObservation already stores. The caller supplies them; keeping the
+# lookup out of here is what keeps this module free of the database.
+#
+# NOTE ON SEVERITY - deliberately LOW, and not because it is unimportant.
+# If this fires, our extraction may be perfectly correct: we read the page right, and the page is
+# making a claim its own history does not support. Charging it as HIGH or CRITICAL would reject a
+# GOOD heal for something that is not a defect in the heal. LOW keeps the verdict at PASS (100 - 3)
+# so the repair still commits, while the finding is still reported and can be surfaced on its own.
+# The severity encodes "this is not an extraction fault", not "this does not matter".
+
+def check_reference_price(records: list[dict], reference_prices: dict[str, float],
+                          *, name_field: str = "name", claim_field: str = "original_price",
+                          tolerance: float = 0.02) -> list[CheckResult]:
+    """Compare each row's claimed was-price against the price we confirmed before the sale.
+
+    `reference_prices` maps a product name to the last price we observed and the guardian confirmed
+    BEFORE the current sale started. A claimed original above that is a discount measured from a
+    number nobody was charged.
+
+    `tolerance` (2%) absorbs rounding and small legitimate movement between our last observation and
+    the sale starting. Anything inside it is not evidence of anything.
+
+    Nothing fires when `reference_prices` is empty, which is the normal case: an ordinary heal
+    validation has no sale to audit and no business inventing one.
+    """
+    if not reference_prices:
+        return []
+
+    lookup = {str(k).strip().casefold(): v for k, v in reference_prices.items()}
+
+    checked = 0
+    inflated: list[dict] = []
+    for rec in records:
+        name = rec.get(name_field)
+        claimed = _coerce_number(rec.get(claim_field))
+        if name is None or claimed is None:
+            continue
+        prior = lookup.get(str(name).strip().casefold())
+        if prior is None:
+            continue
+        checked += 1
+
+        # Only an INFLATED claim is a finding. A claimed original below what we recorded understates
+        # the discount, which is a retailer's own business and harms nobody.
+        if claimed <= prior * (1 + tolerance):
+            continue
+        inflated.append({"product": str(name), "claimed_original": claimed,
+                         "confirmed_before_sale": prior,
+                         "overstated_by": round(claimed - prior, 2),
+                         "current_price": _coerce_number(rec.get("price"))})
+
+    if not inflated:
+        return []
+
+    # ONE result for the whole run, not one per row. Severity is a fixed cost in verdict._score, so a
+    # per-row finding would charge the same fault 30 times and saturate the score to a FAIL - which is
+    # both wrong (a good extraction would be rejected) and misleading (one policy, not 30 faults).
+    # check_value_ordering aggregates for the same reason; this follows it.
+    worst = max(inflated, key=lambda d: d["overstated_by"])
+    total = round(sum(d["overstated_by"] for d in inflated), 2)
+    rate = len(inflated) / checked
+
+    return [CheckResult(
+        False, Severity.LOW, claim_field, "REFERENCE_PRICE_UNSUPPORTED",
+        f"{len(inflated)} of {checked} products advertise a was-price higher than anything we "
+        f"recorded before this sale. The largest: '{worst['product']}' claims "
+        f"{_fmt_money(worst['claimed_original'])}, but the last price we confirmed for it was "
+        f"{_fmt_money(worst['confirmed_before_sale'])} - a shopper would see a discount "
+        f"{_fmt_money(worst['overstated_by'])} deeper than our record supports.",
+        {"products_affected": len(inflated), "products_checked": checked,
+         "inflated_rate": rate, "total_overstated": total,
+         "worst_product": worst["product"],
+         "claimed_original": worst["claimed_original"],
+         "confirmed_before_sale": worst["confirmed_before_sale"],
+         "overstated_by": worst["overstated_by"],
+         "current_price": worst["current_price"],
+         "examples": inflated[:5]},
+    )]
+
+
+def _fmt_money(v: float) -> str:
+    return f"${v:,.2f}"
+
+
+# --------------------------------------------------------------------------------------
 # Orchestration
 # --------------------------------------------------------------------------------------
 
 def run_all_checks(baseline_profiles: dict[str, FieldProfile], proposed_records: list[dict],
-                   baseline_count: int, *, is_sample: bool = False) -> list[CheckResult]:
+                   baseline_count: int, *, is_sample: bool = False,
+                   reference_prices: Optional[dict[str, float]] = None) -> list[CheckResult]:
     """Run the deterministic tiers (1 + 2).
 
     Returns one CheckResult per FAILURE. Checks do not emit a result when they pass, so a
     clean run yields the single synthetic OK below - callers must not count passing results.
+
+    `reference_prices` maps product name -> the price confirmed before the current sale. Supply it
+    only when auditing a sale claim; omitted, check_reference_price stands down entirely. It is the
+    one check here that judges the SITE rather than our own extraction, which is why it is scored LOW
+    and cannot by itself reject an otherwise good heal - see its own note.
 
     `is_sample` says the proposed rows are a PREVIEW of what the heal would return, not the whole run.
     Bright Data's approval gate works that way: `preview_result` gave us 1 row against a 96-row
@@ -438,6 +542,7 @@ def run_all_checks(baseline_profiles: dict[str, FieldProfile], proposed_records:
     results += check_column_swap(baseline_profiles, proposed_profiles)
     results += check_bool_ratio(baseline_profiles, proposed_profiles)
     results += check_value_ordering(proposed_records)
+    results += check_reference_price(proposed_records, reference_prices or {})
 
     if not results:
         results.append(CheckResult(True, Severity.LOW, "__run__", "OK",

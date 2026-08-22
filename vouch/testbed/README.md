@@ -87,6 +87,24 @@ npx netlify-cli deploy --dir . --prod    # redeploy
 | `nulls` | price blanked on 70% of rows | `NULL_SPIKE` 🟠 | REVIEW 75/100 |
 | `collapse` | every name pinned to one string | `CARDINALITY_COLLAPSE` 🟡 | PASS 90/100 ⚠️ |
 | `instock` | in_stock forced false | `BOOL_RATIO_SHIFT` 🟡 | PASS 90/100 ⚠️ |
+| `fake_sale` | real 30% cut, was-price inflated 1.6× | `REFERENCE_PRICE_UNSUPPORTED` | PASS 97/100 ✅ |
+
+### `fake_sale` — the second application
+
+Every price genuinely drops 30%, so a shopper sees a real reduction. But the crossed-out number it's
+measured from is 1.6× anything the page ever charged. Nothing on the page is internally inconsistent:
+`price` is still below `original_price`, so the ordering invariant is satisfied, and both medians move
+together so nothing drifts. **Only a dated record of what the page said before the sale can catch it**
+— which is why this is a scraping problem and not an arithmetic one.
+
+`PASS 97/100` is the *correct* outcome, not a gap. Our extraction is right — we read the page exactly
+as written — so the heal is sound and must commit. The finding is about the retailer's claim, and
+`check_reference_price` is scored LOW precisely so it can never reject a good repair for something the
+repair didn't cause.
+
+The pre-sale record is supplied by the caller (`reference_prices={name: price}`). In production it
+comes from the confirmed `CompetitorObservation` rows; in `verify.py` it comes from the clean page.
+Omit it and the check stands down entirely — an ordinary heal has no sale to audit.
 
 Then heal against the broken page and let the guardian judge the preview:
 

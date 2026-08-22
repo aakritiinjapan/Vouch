@@ -25,3 +25,6 @@ dist/
 .demo-ui.log
 CLAUDE.md
 scratchpad/
+
+# derived preview output (rebuild with testbed/preview.py)
+vouch/testbed/preview/

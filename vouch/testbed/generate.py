@@ -87,7 +87,15 @@ VARIANTS: dict[str, str] = {
     "collapse": "every name pinned to one string        -> CARDINALITY_COLLAPSE (medium)",
     "instock":  "in_stock forced false everywhere       -> BOOL_RATIO_SHIFT (medium)",
     "drift":    "price AND original_price inflated 4x   -> NUMERIC_DRIFT (high)",
+    "fake_sale": "a sale whose was-prices were never charged -> REFERENCE_PRICE_UNSUPPORTED (low)",
 }
+
+# How deep the fake sale claims to cut, and how much of it is invented. The claimed was-price is
+# lifted well above anything the page ever showed; the sale price is a genuine reduction, so the page
+# looks entirely plausible on its own. That is the point - the claim is only checkable against a
+# dated record of what came before, which is what makes this a scraping problem and not a maths one.
+FAKE_SALE_DISCOUNT = 0.30   # the visible price really does drop 30%
+FAKE_SALE_INFLATION = 1.60  # but the "was" price is 1.6x what was ever actually charged
 
 
 def apply_variant(rows: list[dict], variant: str) -> list[dict]:
@@ -137,6 +145,20 @@ def apply_variant(rows: list[dict], variant: str) -> list[dict]:
         # like: the element is missing, so nothing reads as in stock.
         for r in out:
             r["in_stock"] = False
+        return out
+
+    if variant == "fake_sale":
+        # Black Friday, as it is actually done. Every price genuinely falls 30%, so a shopper sees a
+        # real reduction - but the crossed-out number it is measured from is 1.6x anything the page
+        # ever charged. Nothing here is internally inconsistent: price is still below original_price,
+        # so check_value_ordering is satisfied, and the medians move together so nothing drifts.
+        # Only a record of what the page said BEFORE the sale can catch it.
+        for r in out:
+            if r["price"] is None:
+                continue
+            was_charged = r["price"]
+            r["price"] = round(was_charged * (1 - FAKE_SALE_DISCOUNT), 2)
+            r["original_price"] = round(was_charged * FAKE_SALE_INFLATION, 2)
         return out
 
     if variant == "drift":
