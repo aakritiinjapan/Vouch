@@ -1,0 +1,11 @@
+# Static single-file site: no build step, index.html is served as-is.
+[build]
+  publish = "."
+  command = ""
+
+# A test fixture should never be indexed as if it were a real shop. The page also carries
+# <meta name="robots" content="noindex, nofollow">; this covers crawlers that read headers only.
+[[headers]]
+  for = "/*"
+  [headers.values]
+    X-Robots-Tag = "noindex, nofollow"
