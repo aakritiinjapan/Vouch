@@ -28,7 +28,7 @@ and (optional) model key. The repricer further down is its first consumer.</sub>
 ## Quickstart
 
 ```bash
-git clone https://github.com/DeepakReddyVelagala/Vouch.git
+git clone https://github.com/aakritiinjapan/Vouch.git
 cd Vouch
 ./demo.sh
 ```
