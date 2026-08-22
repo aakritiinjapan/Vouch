@@ -101,20 +101,12 @@ export function Console(props: ConsoleProps) {
 
   return (
     <div className="mx-auto max-w-[1200px] px-6 py-8">
-      {/* ① identity + purpose + scope */}
-      <div className="flex flex-wrap items-end justify-between gap-x-6 gap-y-3">
-        <div>
-          <h1 className="font-display text-title font-bold text-ink">Pricing desk</h1>
-          <p className="mt-1.5 max-w-xl text-ink-secondary text-pretty">
-            We move your price only on competitor data we can prove is real.
-          </p>
-        </div>
-        <div className="flex items-center gap-2 text-sm">
-          <span className="eyebrow">Checking against</span>
-          <span className="font-semibold text-ink">Newegg</span>
-          <span className="text-ink-muted">·</span>
-          <span className="num text-ink-secondary">{products.length} products</span>
-        </div>
+      {/* ① scope */}
+      <div className="flex items-center gap-2 text-sm">
+        <span className="eyebrow">Checking against</span>
+        <span className="font-semibold text-ink">Newegg</span>
+        <span className="text-ink-muted">·</span>
+        <span className="num text-ink-secondary">{products.length} products</span>
       </div>
 
       <div

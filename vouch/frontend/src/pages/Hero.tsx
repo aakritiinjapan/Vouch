@@ -42,9 +42,9 @@ export function Hero({ navigate }: { navigate: Navigate }) {
             <button
               type="button"
               onClick={() => navigate("console")}
-              className="rounded-full bg-brand px-4 py-2 text-sm font-semibold text-canvas transition-colors hover:bg-brand-soft"
+              className="rounded-full border border-hairStrong px-4 py-2 text-sm font-medium text-ink transition-colors hover:bg-white/[0.05]"
             >
-              Launch console
+              Launch repricer
             </button>
           </nav>
         </header>
@@ -67,13 +67,6 @@ export function Hero({ navigate }: { navigate: Navigate }) {
               className="rounded-full bg-brand px-6 py-3 text-sm font-semibold text-canvas transition-colors hover:bg-brand-soft"
             >
               See it catch a bad price →
-            </button>
-            <button
-              type="button"
-              onClick={() => navigate("console")}
-              className="rounded-full border border-hairStrong px-6 py-3 text-sm font-medium text-ink transition-colors hover:bg-white/[0.05]"
-            >
-              Launch console
             </button>
           </div>
         </section>
@@ -114,23 +107,50 @@ export function Hero({ navigate }: { navigate: Navigate }) {
               The verdict is the product.
             </h2>
             <p className="mt-4 max-w-xl text-ink-secondary text-pretty">
-              Every scrape returns one portable verdict. The repricer is just its first consumer —
-              send rows, get back trust.
+              Every scrape returns one portable verdict. The repricer is just its first consumer.
             </p>
             <p className="mt-5 flex flex-wrap items-center gap-x-2 text-sm">
               <span className="font-semibold text-held">✕ FAIL</span>
               <span className="text-ink-muted">· trust 40/100 (Low) · scraper mixed up two columns</span>
             </p>
-            <button
-              type="button"
-              onClick={() => navigate("trust-api", { scenario: "column-swap" })}
-              className="mt-6 rounded-full border border-hairStrong px-5 py-2.5 text-sm font-semibold text-ink transition-colors hover:bg-white/[0.05]"
-            >
-              Try the Trust API →
-            </button>
           </div>
           <div className="hidden justify-self-center sm:block">
             <VerdictGauge decision="fail" score={40} size={188} />
+          </div>
+        </section>
+
+        {/* surfaces — what's inside */}
+        <section className="mt-20">
+          <p className="eyebrow">What&rsquo;s inside</p>
+          <div className="mt-6 grid gap-5 sm:grid-cols-2">
+            <div className="flex flex-col rounded-lg border border-hair bg-surface p-7 shadow-soft">
+              <p className="font-display text-h2 font-semibold text-ink">Repricer</p>
+              <p className="mt-2.5 flex-1 text-sm text-ink-secondary text-pretty">
+                Vouch holds any price move it can&rsquo;t verify — you see exactly why, and approve
+                or skip with full evidence in front of you.
+              </p>
+              <button
+                type="button"
+                onClick={() => navigate("console")}
+                className="mt-6 self-start rounded-full border border-hairStrong px-5 py-2.5 text-sm font-medium text-ink transition-colors hover:bg-white/[0.05]"
+              >
+                Open repricer →
+              </button>
+            </div>
+            <div className="flex flex-col rounded-lg border border-hair bg-surface p-7 shadow-soft">
+              <p className="font-display text-h2 font-semibold text-ink">Trust API</p>
+              <p className="mt-2.5 flex-1 text-sm text-ink-secondary text-pretty">
+                The verdict as a stateless primitive. Send rows, get back trust — the same guardian
+                the repricer relies on, callable by any pipeline.
+              </p>
+              <button
+                type="button"
+                onClick={() => navigate("trust-api")}
+                className="mt-6 self-start rounded-full border border-hairStrong px-5 py-2.5 text-sm font-medium text-ink transition-colors hover:bg-white/[0.05]"
+              >
+                Explore the API →
+              </button>
+            </div>
           </div>
         </section>
 

@@ -9,7 +9,7 @@ import { Wordmark } from "./Wordmark";
 import { DemoMenu, type DemoMenuProps } from "./DemoMenu";
 
 const TABS: { view: View; label: string }[] = [
-  { view: "console", label: "Console" },
+  { view: "console", label: "Repricer" },
   { view: "trust-api", label: "Trust API" },
 ];
 
