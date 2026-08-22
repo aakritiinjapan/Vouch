@@ -90,22 +90,12 @@ export function TrustApi({
 
   return (
     <div className="mx-auto max-w-[1200px] px-6 py-8">
-      <div className="mb-7">
-        <p className="eyebrow">Trust API</p>
-        <h1 className="mt-3 font-display text-title font-bold text-ink">
-          The verdict is the product.
-        </h1>
-        <p className="mt-2 max-w-2xl text-ink-secondary text-pretty">
-          The repricer is one consumer — anything can be. Send rows, get back trust. For developers &amp;
-          platform teams: the guardian&rsquo;s verdict as a stateless API.
+      {bridgedFrom && (
+        <p className="mb-6 inline-block rounded-md border border-brand/30 bg-brand/[0.08] px-3 py-2 text-xs text-ink-secondary">
+          ↳ Verifying <span className="font-semibold text-ink">{bridgedFrom}</span> — the row you
+          clicked on the Console.
         </p>
-        {bridgedFrom && (
-          <p className="mt-4 inline-block rounded-md border border-brand/30 bg-brand/[0.08] px-3 py-2 text-xs text-ink-secondary">
-            ↳ Verifying <span className="font-semibold text-ink">{bridgedFrom}</span> — the row you
-            clicked on the Console.
-          </p>
-        )}
-      </div>
+      )}
 
       <div className="grid grid-cols-1 items-start gap-6 lg:grid-cols-2">
         {/* TRY IT */}
