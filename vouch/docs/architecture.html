@@ -1,0 +1,514 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Vouch — how it works with Bright Data Scraper Studio</title>
+<!--
+  A standing overview of the integration, written against the code rather than from memory.
+  Every API path, threshold and check name here was read out of vouch/backend before writing.
+  Open it in a browser; it is self-contained and needs no server.
+-->
+<style>
+  :root {
+    --canvas:#0B0A10; --surface:#14171e; --raised:#191d26;
+    --hair:rgba(255,255,255,.09); --hair2:rgba(255,255,255,.16);
+    --ink:#e8eaf0; --ink2:#a8adbd; --ink3:#6f7484;
+    --brand:#8B7CFF; --mint:#4ADE9E; --amber:#F2C14E; --red:#FF5C5C; --cyan:#7CC6FF;
+    color-scheme: dark;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--canvas);color:var(--ink);
+    font:15px/1.6 ui-sans-serif,system-ui,"Segoe UI",sans-serif;
+    background-image:radial-gradient(900px 500px at 15% -10%, rgba(139,124,255,.13), transparent 60%),
+                     radial-gradient(700px 400px at 95% 0%, rgba(74,222,158,.07), transparent 60%);}
+  .wrap{max-width:1120px;margin:0 auto;padding:44px 28px 90px}
+  code,.mono{font-family:ui-monospace,"JetBrains Mono",Consolas,monospace}
+  h1{font-size:31px;line-height:1.15;letter-spacing:-.025em;margin:0 0 10px;font-weight:800}
+  h2{font-size:19px;letter-spacing:-.01em;margin:0 0 4px;font-weight:700}
+  .eyebrow{font-size:10.5px;text-transform:uppercase;letter-spacing:.11em;color:var(--brand);
+    font-weight:700;margin:0 0 7px}
+  .lede{color:var(--ink2);max-width:74ch;font-size:16px}
+  section{margin-top:38px}
+  .sub{color:var(--ink3);font-size:13px;margin:2px 0 18px;max-width:80ch}
+  .card{background:var(--surface);border:1px solid var(--hair);border-radius:13px;padding:20px}
+  .grid{display:grid;gap:13px}
+  .g2{grid-template-columns:repeat(auto-fit,minmax(320px,1fr))}
+  .g3{grid-template-columns:repeat(auto-fit,minmax(240px,1fr))}
+  table{width:100%;border-collapse:collapse;font-size:13.5px}
+  th{text-align:left;font-size:10px;text-transform:uppercase;letter-spacing:.09em;
+    color:var(--ink3);font-weight:700;padding:0 12px 8px 0;border-bottom:1px solid var(--hair)}
+  td{padding:9px 12px 9px 0;border-bottom:1px solid rgba(255,255,255,.05);vertical-align:top}
+  tr:last-child td{border-bottom:0}
+  .tag{display:inline-block;font-size:10.5px;font-weight:700;letter-spacing:.05em;
+    padding:2px 7px;border-radius:5px;border:1px solid;white-space:nowrap}
+  .t-crit{color:var(--red);border-color:rgba(255,92,92,.4);background:rgba(255,92,92,.1)}
+  .t-high{color:#FF9F5C;border-color:rgba(255,159,92,.4);background:rgba(255,159,92,.1)}
+  .t-med{color:var(--amber);border-color:rgba(242,193,78,.4);background:rgba(242,193,78,.1)}
+  .t-low{color:var(--ink2);border-color:var(--hair2);background:rgba(255,255,255,.05)}
+  .t-ok{color:var(--mint);border-color:rgba(74,222,158,.4);background:rgba(74,222,158,.1)}
+  .t-brand{color:var(--brand);border-color:rgba(139,124,255,.4);background:rgba(139,124,255,.1)}
+
+  /* the pipeline */
+  .flow{display:flex;flex-wrap:wrap;gap:10px;align-items:stretch}
+  .step{flex:1 1 150px;background:var(--raised);border:1px solid var(--hair);
+    border-radius:11px;padding:13px 14px;position:relative;min-width:150px}
+  .step.gate{border-color:rgba(242,193,78,.5);background:rgba(242,193,78,.07)}
+  .step .n{font-size:10px;color:var(--ink3);font-weight:700;letter-spacing:.08em}
+  .step .t{font-weight:700;font-size:14px;margin-top:3px}
+  .step .c{font-size:11.5px;color:var(--ink3);margin-top:5px;line-height:1.45}
+  .step .cmd{font-size:10.5px;color:var(--cyan);margin-top:7px;word-break:break-all}
+  .arrow{align-self:center;color:var(--ink3);font-size:17px;flex:0 0 auto}
+
+  pre{background:#0d1016;border:1px solid var(--hair);border-radius:10px;padding:14px 16px;
+    overflow-x:auto;font-size:12.5px;line-height:1.65;margin:0}
+  pre .k{color:var(--brand)} pre .s{color:var(--mint)} pre .c{color:var(--ink3)}
+  pre .n{color:var(--amber)}
+  .kv{display:grid;grid-template-columns:auto 1fr;gap:5px 14px;font-size:13px}
+  .kv dt{color:var(--ink3)} .kv dd{margin:0;font-weight:600}
+  .note{border-left:2px solid var(--brand);padding:2px 0 2px 13px;color:var(--ink2);font-size:13.5px}
+  .warn{border-left:2px solid var(--amber);padding:2px 0 2px 13px;color:var(--ink2);font-size:13.5px}
+  ul{margin:8px 0 0;padding-left:19px;color:var(--ink2);font-size:13.5px}
+  li{margin:4px 0}
+  .foot{margin-top:44px;padding-top:18px;border-top:1px solid var(--hair);
+    color:var(--ink3);font-size:12px}
+  .big{font-size:26px;font-weight:800;letter-spacing:-.02em}
+  .rule{height:1px;background:var(--hair);margin:16px 0}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <p class="eyebrow">Vouch × Bright Data Scraper Studio</p>
+  <h1>How we work with the scraper API</h1>
+  <p class="lede">
+    Bright Data's Scraper Studio can repair its own scrapers. Vouch is the layer that checks whether
+    the repair still means the same thing — <strong>before</strong> it is committed. This page is the
+    integration, end to end, as the code actually does it.
+  </p>
+
+  <!-- ─────────────────────────── the load-bearing fact ─────────────────────────── -->
+  <section>
+    <p class="eyebrow">Why this is possible at all</p>
+    <h2>The approval gate hands back rows, not just a diff</h2>
+    <p class="sub">Everything downstream depends on this one behaviour.</p>
+    <div class="card">
+      <p style="margin:0 0 12px">
+        Run <code>scraper heal</code> <strong>without</strong> <code>--auto-approve</code> and it exits
+        <code>0</code> with an envelope containing <code class="mono" style="color:var(--amber)">status:
+        "awaiting_approval"</code> and <code class="mono" style="color:var(--mint)">preview_result</code>
+        — the sample rows the repaired scraper <em>would</em> return.
+      </p>
+      <div class="note">
+        Scraper Studio's own Accept / Decline screen shows only the <strong>code diff</strong>.
+        <code>preview_result</code> is surfaced by the CLI and API path alone. So Vouch validates data
+        that Bright Data's own approval screen cannot show a human — and it does it before anything is
+        committed, which matters because there is <strong>no programmatic rollback of an approved
+        heal</strong>. The gate is the only safe place to stand.
+      </div>
+      <div class="rule"></div>
+      <p class="warn" style="margin:0">
+        We never pass <code>--auto-approve</code>. It commits without the gate, which removes the thing
+        this product is.
+      </p>
+    </div>
+  </section>
+
+  <!-- ─────────────────────────── the pipeline ─────────────────────────── -->
+  <section>
+    <p class="eyebrow">The loop</p>
+    <h2>One cycle, start to finish</h2>
+    <p class="sub">
+      Steps 1–2 happen once per collector. Steps 3–6 are the cycle that runs on a schedule, and the
+      guardian sits between the proposal and the commit.
+    </p>
+
+    <div class="flow">
+      <div class="step">
+        <div class="n">01 · ONCE</div>
+        <div class="t">Create</div>
+        <div class="c">A custom collector from a URL and a plain-English field description. Returns the
+          <code>c_*</code> id.</div>
+        <div class="cmd mono">scraper create &lt;url&gt; "&lt;desc&gt;"</div>
+      </div>
+      <div class="arrow">→</div>
+      <div class="step">
+        <div class="n">02 · ONCE</div>
+        <div class="t">Baseline</div>
+        <div class="c">First clean run is profiled and stored. This becomes the yardstick every later
+          heal is judged against.</div>
+        <div class="cmd mono">scraper run &lt;id&gt; --sync</div>
+      </div>
+      <div class="arrow">→</div>
+      <div class="step">
+        <div class="n">03 · CYCLE</div>
+        <div class="t">Run</div>
+        <div class="c">Routine scrape. If nulls spike or a field vanishes, the run is degraded and a
+          heal is triggered.</div>
+        <div class="cmd mono">scraper run &lt;id&gt; --sync</div>
+      </div>
+      <div class="arrow">→</div>
+      <div class="step gate">
+        <div class="n">04 · CYCLE</div>
+        <div class="t">Heal → gate ⏸</div>
+        <div class="c">Bright Data proposes a repair and <strong>stops</strong>. We read
+          <code>preview_result</code>.</div>
+        <div class="cmd mono">scraper heal &lt;id&gt; "&lt;prompt&gt;"</div>
+      </div>
+    </div>
+
+    <div class="flow" style="margin-top:10px">
+      <div class="step" style="border-color:rgba(139,124,255,.5);background:rgba(139,124,255,.07)">
+        <div class="n">05 · CYCLE — VOUCH</div>
+        <div class="t">Judge 🛡</div>
+        <div class="c">9 checks over the preview rows vs the baseline profile → a confidence score and
+          a plain-English brief. <strong>No network call.</strong></div>
+        <div class="cmd mono">run_all_checks() → decide()</div>
+      </div>
+      <div class="arrow">→</div>
+      <div class="step">
+        <div class="n">06a · PASS</div>
+        <div class="t">Approve</div>
+        <div class="c">Commit the repair. Same collector id, nothing downstream touched. Baseline
+          advances to the verified rows.</div>
+        <div class="cmd mono">scraper approve &lt;id&gt;</div>
+      </div>
+      <div class="arrow">or</div>
+      <div class="step">
+        <div class="n">06b · FAIL</div>
+        <div class="t">Reject &amp; re-prompt</div>
+        <div class="c">Scraper left unchanged. The guardian's own diagnosis becomes the next heal
+          prompt. Capped at 2 attempts.</div>
+        <div class="cmd mono">scraper approve &lt;id&gt; --reject</div>
+      </div>
+    </div>
+
+    <div class="card" style="margin-top:13px">
+      <div class="note" style="margin:0">
+        <strong>The re-prompt is the part worth watching.</strong> On a rejection,
+        <code>_resharpen_prompt()</code> dispatches on the failing check and interpolates its evidence,
+        so the validator writes Scraper Studio's next instruction — e.g. <em>“the values you returned
+        (median $16.75) match the shipping column's historical range, not price's (median
+        ~$1,274.50)”</em>. The baseline only ever advances on a heal the guardian confirmed; a rejected
+        run never becomes the new yardstick.
+      </div>
+    </div>
+  </section>
+
+  <!-- ─────────────────────────── CLI ↔ REST ─────────────────────────── -->
+  <section>
+    <p class="eyebrow">The integration</p>
+    <h2>What each command is, underneath</h2>
+    <p class="sub">
+      We drive the CLI (<code>@brightdata/cli</code> v0.3.5 via <code>npx</code>) because the Python
+      SDK exposes only <code>run</code> / <code>trigger</code> / <code>status</code> — it has no
+      <code>heal</code>, <code>approve</code> or <code>reject</code>. The CLI is the only self-serve
+      surface for the heal loop, which is why <code>brightdata.py</code> shells out rather than
+      importing an SDK.
+    </p>
+    <div class="card">
+      <table>
+        <thead><tr><th style="width:31%">CLI command</th><th>REST underneath</th><th style="width:24%">Our function</th></tr></thead>
+        <tbody>
+          <tr>
+            <td><code>scraper create</code></td>
+            <td class="mono" style="font-size:12px">POST /dca/collector<br>POST /dca/collectors/{id}/automate_template</td>
+            <td><code>create_collector()</code></td>
+          </tr>
+          <tr>
+            <td><code>scraper run --sync</code></td>
+            <td class="mono" style="font-size:12px">POST /dca/trigger_immediate<br>GET /dca/get_result</td>
+            <td><code>run()</code></td>
+          </tr>
+          <tr>
+            <td><code>scraper heal</code></td>
+            <td class="mono" style="font-size:12px">POST /dca/collectors/{id}/refactor_template<br>poll …/progress</td>
+            <td><code>propose_heal()</code></td>
+          </tr>
+          <tr>
+            <td><code>scraper approve</code></td>
+            <td class="mono" style="font-size:12px">POST /dca/collectors/{id}/resume_automation_job<br><code>{"message": true}</code></td>
+            <td><code>approve_heal()</code></td>
+          </tr>
+          <tr>
+            <td><code>scraper approve --reject</code></td>
+            <td class="mono" style="font-size:12px">…/resume_automation_job<br><code>{"message": false}</code></td>
+            <td><code>reject_heal()</code></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- ─────────────────────────── the battery ─────────────────────────── -->
+  <section>
+    <p class="eyebrow">The guardian</p>
+    <h2>Nine checks, cheapest first</h2>
+    <p class="sub">
+      Pure stdlib, no network, no third-party deps — so the deterministic tiers gate whether the
+      expensive LLM tier ever runs at all.
+    </p>
+    <div class="card">
+      <table>
+        <thead><tr><th style="width:15%">Tier</th><th style="width:26%">Check</th><th style="width:14%">Severity</th><th>Fires when</th></tr></thead>
+        <tbody>
+          <tr><td>1 · structural</td><td><code>FIELD_MISSING</code></td><td><span class="tag t-crit">critical</span></td><td>A baseline field is gone</td></tr>
+          <tr><td>1 · structural</td><td><code>NULL_SPIKE</code></td><td><span class="tag t-high">high</span></td><td>Empty rate rose &gt; 20 points</td></tr>
+          <tr><td>1 · structural</td><td><code>ROW_COUNT_SHIFT</code></td><td><span class="tag t-med">medium</span></td><td>Row count moved &gt; ±50%</td></tr>
+          <tr><td>2 · distribution</td><td><code>NUMERIC_DRIFT</code></td><td><span class="tag t-high">high</span></td><td>A median moved &gt; 50%</td></tr>
+          <tr><td>2 · distribution</td><td><code>CARDINALITY_COLLAPSE</code></td><td><span class="tag t-med">medium</span></td><td>≥10 distinct values → ≤10% of that</td></tr>
+          <tr><td>2 · distribution</td><td><code>BOOL_RATIO_SHIFT</code></td><td><span class="tag t-med">medium</span></td><td>True-rate moved &gt; 50 points</td></tr>
+          <tr><td><strong>2b · swap</strong></td><td><code>COLUMN_SWAP</code></td><td><span class="tag t-crit">critical</span></td><td>Values sit on <em>another</em> field's distribution</td></tr>
+          <tr><td><strong>2c · invariant</strong></td><td><code>VALUE_ORDER_INVERTED</code></td><td><span class="tag t-crit">critical</span></td><td><code>price &gt; original_price</code> on &gt;20% of rows</td></tr>
+          <tr><td><strong>2d · the past</strong></td><td><code>REFERENCE_PRICE_UNSUPPORTED</code></td><td><span class="tag t-low">low</span></td><td>A was-price exceeds what we confirmed pre-sale</td></tr>
+          <tr><td>3 · semantic</td><td>LLM judge</td><td><span class="tag t-brand">review only</span></td><td>Consulted <em>only</em> when tiers 1–2 return REVIEW</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="grid g2" style="margin-top:13px">
+      <div class="card">
+        <h2 style="font-size:15px">Scoring, then the decision</h2>
+        <pre style="margin-top:10px"><span class="c"># one penalty per ROOT CAUSE, not per finding</span>
+critical <span class="n">60</span>  high <span class="n">25</span>  medium <span class="n">10</span>  low <span class="n">3</span>
+
+<span class="k">if</span> any critical <span class="k">or</span> score &lt; <span class="n">60</span>:  FAIL
+<span class="k">elif</span> any high  <span class="k">or</span> score &lt; <span class="n">85</span>:  REVIEW
+<span class="k">else</span>:                            PASS</pre>
+        <p style="font-size:13px;color:var(--ink2);margin:11px 0 0">
+          A single critical fails regardless of score — a column swap cannot be outvoted by everything
+          else looking fine.
+        </p>
+      </div>
+      <div class="card">
+        <h2 style="font-size:15px">Why swaps are charged once</h2>
+        <p style="font-size:13px;color:var(--ink2);margin:8px 0 0">
+          One price↔shipping swap trips four checks: <code>COLUMN_SWAP</code> from both sides plus
+          <code>NUMERIC_DRIFT</code> on both fields. Charged individually that is 170 points, which
+          saturates the score to <strong>0/100</strong> — and a saturated zero reads as a broken meter,
+          not as calibrated judgment.
+        </p>
+        <p style="font-size:13px;color:var(--ink2);margin:9px 0 0">
+          So scoring collapses swap pairs to one charge and suppresses the drift as a consequence.
+          Result: <strong>40/100</strong> — still a definite fail, but a legible one. Every finding is
+          still <em>reported</em>; only the scoring collapses.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ─────────────────────────── preview_result is a sample ─────────────────────────── -->
+  <section>
+    <p class="eyebrow">The trap that shaped the design</p>
+    <h2><code>preview_result</code> is a sample, and the docs never say how big</h2>
+    <p class="sub">
+      Every example in Bright Data's docs elides the array with <code>…</code>. Measured against our
+      live collector: <strong>1 row, against a 96-row baseline.</strong>
+    </p>
+    <div class="grid g2">
+      <div class="card">
+        <p style="margin:0 0 10px;font-size:13.5px;color:var(--ink2)">
+          Any check that reasons about volume measures the <em>preview</em> instead of the heal:
+        </p>
+        <pre><span class="c">ROW_COUNT_SHIFT       Row count changed from 96 to 1.
+CARDINALITY_COLLAPSE  'name' went from 96 to 1</span></pre>
+        <p style="margin:11px 0 0;font-size:13.5px;color:var(--ink2)">
+          Both are artefacts of the sample size — the heal itself was fine. So
+          <code>run_all_checks(is_sample=True)</code> stands those two down, and
+          <code>HealProposal.is_sample</code> carries the distinction from the real gate (always a
+          sample) versus a fixture (full size).
+        </p>
+      </div>
+      <div class="card">
+        <p style="margin:0 0 9px;font-size:12px;text-transform:uppercase;letter-spacing:.09em;color:var(--ink3);font-weight:700">
+          Detection survives on one row
+        </p>
+        <table>
+          <tbody>
+            <tr><td>a legitimate price</td><td><span class="tag t-ok">PASS 100</span></td></tr>
+            <tr><td>shipping cost in <code>price</code></td><td><span class="tag t-crit">FAIL 40</span></td></tr>
+            <tr><td>a null price</td><td><span class="tag t-med">REVIEW 75</span></td></tr>
+            <tr><td>no <code>price</code> field</td><td><span class="tag t-crit">FAIL 40</span></td></tr>
+            <tr><td>crossed-out original (14% high)</td><td><span class="tag t-crit">FAIL 40</span></td></tr>
+          </tbody>
+        </table>
+        <p style="margin:11px 0 0;font-size:12.5px;color:var(--ink3)">
+          Three are row-local facts; <code>COLUMN_SWAP</code> asks which distribution a value sits
+          <em>on</em>, not how it is spread. Only <code>_profile_distance</code> needed adjusting —
+          below 5 rows it compares medians only.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ─────────────────────────── the two consumers ─────────────────────────── -->
+  <section>
+    <p class="eyebrow">What the verdict is for</p>
+    <h2>One verification layer, two consumers</h2>
+    <p class="sub">
+      The verdict is the product; repricing is only its first consumer. The second one only exists
+      because the first one works.
+    </p>
+    <div class="grid g2">
+      <div class="card" style="border-color:rgba(255,92,92,.32)">
+        <p class="eyebrow" style="color:var(--red)">Example ① · the seller loses</p>
+        <h2 style="font-size:16px">Competitive repricing</h2>
+        <p style="font-size:13.5px;color:var(--ink2);margin:8px 0 0">
+          The competitor relaid out their tiles, extraction broke, and the heal began reading the
+          delivery cost into <code>price</code>. A normal repricer matches that phantom number and
+          destroys the margin.
+        </p>
+        <div class="rule"></div>
+        <dl class="kv">
+          <dt>Finding</dt><dd><code>COLUMN_SWAP</code></dd>
+          <dt>Verdict</dt><dd><span class="tag t-crit">FAIL 40/100</span> — repair refused</dd>
+          <dt>Prevented</dt><dd>−$951.00 / unit</dd>
+        </dl>
+      </div>
+      <div class="card" style="border-color:rgba(74,222,158,.32)">
+        <p class="eyebrow" style="color:var(--mint)">Example ② · the shopper loses</p>
+        <h2 style="font-size:16px">Sale price audit</h2>
+        <p style="font-size:13.5px;color:var(--ink2);margin:8px 0 0">
+          The retailer relaid out for a sale, extraction broke, and the heal repaired it
+          <em>correctly</em> — which is what makes the new was-price checkable at all. Every price
+          really fell; the number it is measured from was never charged.
+        </p>
+        <div class="rule"></div>
+        <dl class="kv">
+          <dt>Finding</dt><dd><code>REFERENCE_PRICE_UNSUPPORTED</code></dd>
+          <dt>Verdict</dt><dd><span class="tag t-ok">PASS 97/100</span> — repair committed</dd>
+          <dt>Exposed</dt><dd>−$1,469.99 overstated</dd>
+        </dl>
+      </div>
+    </div>
+    <div class="card" style="margin-top:13px">
+      <div class="note" style="margin:0">
+        <strong>The asymmetry is the argument.</strong> In ① the extraction was <em>wrong</em>, so the
+        repair was refused. In ② the extraction was <em>right</em>, and that is precisely what lets us
+        contradict the retailer. A guardian that only ever rejects is a filter; one that can also
+        certify is infrastructure. And the second check is only trustworthy <em>because</em> of the
+        first — you cannot audit someone's claim about the past if your own record of it might be
+        corrupt.
+      </div>
+    </div>
+  </section>
+
+  <!-- ─────────────────────────── the API we expose ─────────────────────────── -->
+  <section>
+    <p class="eyebrow">Consuming it yourself</p>
+    <h2>The verdict as a stateless endpoint</h2>
+    <p class="sub">
+      <code>POST /verify</code> runs the same pipeline with no product, no baseline row, no pricing and
+      no writes. It takes no database session because it touches nothing.
+    </p>
+    <div class="card">
+      <pre><span class="c"># judge candidate rows against a known-good reference</span>
+curl -X POST http://localhost:8000/verify \
+  -H <span class="s">'Content-Type: application/json'</span> \
+  -d <span class="s">'{
+    "candidate_records": [{"name":"...","price":16.75,"shipping":1274.50}],
+    "baseline_records":  [{"name":"...","price":1274.50,"shipping":16.75}],
+    "is_sample": true
+  }'</span>
+
+<span class="c">→ {</span>
+<span class="c">    "decision": </span><span class="s">"fail"</span><span class="c">,  "confidence": </span><span class="n">40</span><span class="c">,  "confirmed": </span><span class="k">false</span><span class="c">,</span>
+<span class="c">    "brief": </span><span class="s">"Rejected this heal. 'price' now matches the baseline</span>
+<span class="c">              distribution of 'shipping', not 'price'."</span><span class="c">,</span>
+<span class="c">    "failures": [{ "code": </span><span class="s">"COLUMN_SWAP"</span><span class="c">, "severity": </span><span class="s">"critical"</span><span class="c">, … }]</span>
+<span class="c">  }</span></pre>
+      <div class="rule"></div>
+      <div class="grid g3">
+        <div>
+          <p class="eyebrow" style="color:var(--ink3)">Reference, either shape</p>
+          <p style="font-size:13px;color:var(--ink2);margin:0">
+            <code>baseline_records</code> (raw rows we profile) <em>or</em>
+            <code>baseline_profiles</code> (precomputed). Exactly one — both or neither is a 422.
+          </p>
+        </div>
+        <div>
+          <p class="eyebrow" style="color:var(--ink3)">Auditing a sale</p>
+          <p style="font-size:13px;color:var(--ink2);margin:0">
+            <code>reference_prices</code> maps product → price confirmed before the sale. Omit it and
+            that check stands down entirely.
+          </p>
+        </div>
+        <div>
+          <p class="eyebrow" style="color:var(--ink3)">Hardened</p>
+          <p style="font-size:13px;color:var(--ink2);margin:0">
+            5,000-row caps, <code>extra="forbid"</code> so a typo'd knob errors instead of silently
+            no-opping, inferred <code>baseline_count</code>.
+          </p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ─────────────────────────── operational traps ─────────────────────────── -->
+  <section>
+    <p class="eyebrow">Learned the hard way</p>
+    <h2>Traps in the live API</h2>
+    <p class="sub">Each of these cost us credits or left junk on the account.</p>
+    <div class="card">
+      <table>
+        <thead><tr><th style="width:34%">Trap</th><th>What happens, and what we do</th></tr></thead>
+        <tbody>
+          <tr><td><code>description</code> capped at 500 chars</td><td>Over the limit returns 400 — <strong>and the collector still exists</strong>, because <code>create</code> provisions the template before starting AI generation. <code>MAX_DESCRIPTION_CHARS</code> validates locally so the call never leaves the machine.</td></tr>
+          <tr><td>AI generation takes 5–10 min</td><td>Pass a generous timeout (we default 900s). A shorter wall-clock cap loses the collector id from stdout while the job keeps running server-side.</td></tr>
+          <tr><td>No delete, no list</td><td>The CLI surface is exactly create / run / heal / approve. Every failed create leaves an orphan to remove by hand at <code>brightdata.com/cp/scrapers</code>.</td></tr>
+          <tr><td>Collector disabled after approve</td><td>Immediately post-approval, run and trigger both return <code>403 Collector disabled</code>. Re-enable from the dashboard; there is no programmatic toggle.</td></tr>
+          <tr><td>AI-Flow caps concurrency at 3</td><td>A 4th concurrent create/heal returns 429. Our sweep is <strong>deliberately serial</strong> — fanning out would spend the demo in backoff.</td></tr>
+          <tr><td>Two env var names</td><td>CLI reads <code>BRIGHTDATA_API_KEY</code>; the Python SDK reads <code>BRIGHTDATA_API_TOKEN</code>. Config carries both.</td></tr>
+          <tr><td><code>npx</code> on Windows</td><td>It is a <code>.cmd</code> shim, so a bare name raises <code>FileNotFoundError</code>. Resolved with <code>shutil.which</code> — deliberately not <code>shell=True</code>, which would put a heal prompt through shell quoting.</td></tr>
+          <tr><td><code>--url</code> on heal is cosmetic</td><td>The request body is <code>{"prompt":…, "custom_input":[]}</code>. Harmless to pass; do not build logic on it.</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- ─────────────────────────── proof ─────────────────────────── -->
+  <section>
+    <p class="eyebrow">Evidence</p>
+    <h2>What has actually been run</h2>
+    <div class="grid g3">
+      <div class="card">
+        <p class="eyebrow" style="color:var(--ink3)">Live collector</p>
+        <p class="big mono" style="font-size:16px;word-break:break-all">c_mszq0z1x27brru3wab</p>
+        <p style="font-size:12.5px;color:var(--ink3);margin:7px 0 0">Custom-built in Scraper Studio.
+          96 real rows from a public Newegg category page, committed as
+          <code>docs/sample_output.json</code>.</p>
+      </div>
+      <div class="card">
+        <p class="eyebrow" style="color:var(--ink3)">Real heals captured</p>
+        <p class="big">3</p>
+        <p style="font-size:12.5px;color:var(--ink3);margin:7px 0 0">Each caught at the gate before
+          any commit. One was guardian-approved and committed in place — same collector id, nothing
+          downstream touched.</p>
+      </div>
+      <div class="card">
+        <p class="eyebrow" style="color:var(--ink3)">Tests</p>
+        <p class="big">223 <span style="font-size:14px;font-weight:400;color:var(--ink3)">backend</span></p>
+        <p style="font-size:12.5px;color:var(--ink3);margin:7px 0 0">Plus 43 frontend. The guardian
+          runs on pure stdlib, so the whole battery is testable with no network and no database.</p>
+      </div>
+    </div>
+    <div class="card" style="margin-top:13px">
+      <div class="warn" style="margin:0">
+        <strong>Stated plainly:</strong> all three real heals extracted the <em>correct</em> field —
+        including one prompted specifically to steer it wrong. So we have no observed Bright Data
+        mis-heal. Every wrong heal in this repo is one we constructed ourselves, and it demonstrates
+        the guardian's detection, not the healer's failure rate.
+        <code>scripts/heal_lab.py</code> exists to gather that sample honestly.
+      </div>
+    </div>
+  </section>
+
+  <p class="foot">
+    Written against the code in <code>vouch/backend</code>, not from memory — every path, threshold and
+    check name above was read out of the source. CLI <code>@brightdata/cli</code> v0.3.5. Fuller
+    operational detail in <code>docs/BRIGHT_DATA_NOTES.md</code>.
+  </p>
+
+</div>
+</body>
+</html>
