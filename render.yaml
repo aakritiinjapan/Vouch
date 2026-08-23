@@ -4,8 +4,9 @@ services:
     runtime: python
     rootDir: vouch/backend
     buildCommand: pip install -r requirements.txt
-    # Seed runs at startup so the DB is always populated after a cold start or redeploy.
-    startCommand: python -m scripts.seed && uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    # start.sh seeds the DB, starts uvicorn, waits for it, then runs one demo cycle so the
+    # held-proposals queue is populated on every cold start (Render free tier has an ephemeral DB).
+    startCommand: bash scripts/start.sh
     envVars:
       - key: PYTHON_VERSION
         value: "3.11.0"
