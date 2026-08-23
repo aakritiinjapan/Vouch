@@ -10,7 +10,10 @@ Two policies here are load-bearing and easy to lose in a refactor:
   The trust ratchet. A Baseline advances ONLY on guardian-confirmed data - either the initial
   bootstrap or a heal that PASSed. Never on an ordinary run, because the degradation gate only
   screens for missing data; a run that slips past it has not faced the full battery and must not
-  become the yardstick that the next heal is judged against.
+  become the yardstick that the next heal is judged against. Since orchestrator.py started taking
+  its confirming verdict over a full run of the healed template rather than over the approval
+  gate's preview, `outcome.records` are the whole page - which is the first time the ratchet has
+  advanced on a profile of thirty rows instead of two.
 
   No-op suppression. A proposal that would not move the price is not written at all. The queue is
   exception-based (README section 7): it exists to show the seller what needs judgment, not to list
@@ -91,6 +94,89 @@ class CycleRecord:
     observation_id: Optional[int] = None
     baseline_refreshed: bool = False
     superseded_proposal_ids: list[int] = field(default_factory=list)
+
+
+# The keys _event_evidence adds to a HealEvent's evidence dict, alongside the failing check's own.
+#
+# STRINGS AND BOOLEANS ONLY - no numbers, no nested objects. That is a hard constraint rather than a
+# style preference. The held card renders this dict generically (frontend HeldCard.tsx,
+# EvidencePanel): every numeric value goes through a currency formatter and everything else through
+# String(), so `rows_judged: 30` reaches the screen as "$30.00" and a nested block as
+# "[object Object]". A sentence survives that renderer unharmed, and a sentence is what an operator
+# wanted from this panel anyway. Anything that needs the numbers machine-readable has POST /verify,
+# which publishes rows_judged, full_battery and checks_stood_down as typed fields.
+#
+# Flat rather than namespaced for the same reason. Nothing collides today - every check's evidence
+# keys name a field, a rate or a median - but a future check emitting `source_change` would silently
+# overwrite this, so these names are kept sentence-like and unlike anything a check would produce.
+VERIFICATION_KEYS = ("verified_on", "full_battery", "checks_stood_down", "gate_decision",
+                     "draft_check", "source_change", "verification_note")
+
+# How the record names each place the deciding rows can have come from. Spelled out rather than
+# composed, because "the whole page" and "the first rows of it" are the distinction an operator is
+# being asked to trust, and it must not reach them as a variable name.
+_ROWS_FROM_TEXT = {
+    "gate_full_run": "the approval gate returned the whole page — nothing further to run",
+    "gate_preview": "the gate's preview only — enough to reject on, never enough to confirm",
+    "draft_full_run": "a full run of the healed template, not the gate's preview",
+    "none": "nothing — no rows were obtained, so there was nothing to verify",
+}
+
+_DRAFT_CHECK_TEXT = {
+    "held": "production re-read after accepting: unchanged — the heal was still only a draft",
+    "published": "production re-read after accepting: ALREADY CHANGED — accepting published it",
+    "moot": "the healed template extracts the same shape production already did",
+    "unproven": "production could not be shown unchanged after accepting — so nothing was published",
+}
+
+
+def _event_evidence(attempt) -> dict:
+    """What one heal attempt leaves behind: the finding, and how hard we looked before deciding.
+
+    The failing check's own evidence - {"looks_like": "shipping", the medians, ...} - is what lets
+    the held card compose its sentence out of stored facts rather than hardcoded prose. The keys
+    added on top of it are the other half, and they exist because the finding alone cannot tell the
+    study's two answers apart: a PASS over two preview rows and a PASS over thirty write the
+    identical row in this table without them, and the whole point of the loop that produced them is
+    that they are not the same claim.
+    """
+    verdict = attempt.verdict
+    failure = verdict.primary_failure
+    evidence = dict(failure.evidence) if failure and failure.evidence else {}
+
+    evidence["verified_on"] = _verified_on(attempt)
+    evidence["full_battery"] = verdict.full_battery
+    if verdict.checks_stood_down:
+        evidence["checks_stood_down"] = ", ".join(verdict.checks_stood_down)
+    if attempt.gate_verdict is not None:
+        # Recorded apart from the deciding verdict, because "the preview objected" is a cheaper and
+        # weaker claim than "the whole page objected", and reading the two as one is the confusion
+        # this cycle was rebuilt to remove.
+        evidence["gate_decision"] = (
+            f"{attempt.gate_verdict.decision} on {attempt.preview_rows} preview row(s) — a preview "
+            f"can reject, but it can never confirm")
+    if attempt.draft_probe:
+        evidence["draft_check"] = _DRAFT_CHECK_TEXT.get(attempt.draft_probe, attempt.draft_probe)
+
+    diff = attempt.template_diff or {}
+    if diff.get("semantic") and diff.get("summary"):
+        # Only on a repoint. The study's healthy-page probe changed comments and a defensive numeric
+        # guard, and recording that as a change is how a warning channel teaches people to skim.
+        evidence["source_change"] = diff["summary"]
+    if attempt.notes:
+        evidence["verification_note"] = "; ".join(attempt.notes)
+
+    return evidence
+
+
+def _verified_on(attempt) -> str:
+    """One sentence naming where the deciding rows came from, and how many of them there were."""
+    provenance = attempt.verdict.evidence
+    counted = ""
+    if provenance.rows_judged is not None:
+        counted = (f" ({provenance.rows_judged} of {provenance.population_rows} rows)"
+                   if provenance.population_rows else f" ({provenance.rows_judged} rows)")
+    return f"{_ROWS_FROM_TEXT.get(attempt.rows_from, attempt.rows_from)}{counted}"
 
 
 def _supersede_open_holds(session: Session, product_id: int) -> list[int]:
@@ -209,7 +295,7 @@ def run_cycle(session: Session, product: Product, *,
             risk_brief=verdict.brief,
             status=HealStatus.APPROVED if attempt.committed else HealStatus.REJECTED,
             primary_check_code=failure.code if failure else None,
-            evidence=dict(failure.evidence) if failure and failure.evidence else {},
+            evidence=_event_evidence(attempt),
             attempt=attempt.attempt,
             cycle_id=cycle_id,
         )
@@ -486,8 +572,15 @@ def heal_log_entries(event: HealEvent) -> list[dict]:
 
     Done server-side so the vocabulary lives in exactly one reviewable place, and so `kind` gives the
     frontend its severity colour without parsing prose.
+
+    The middle of this log is the part that changed. It used to read gate -> verdict -> commit, which
+    was an accurate description of a loop that judged the approval gate's preview and committed on
+    it. It now shows what the preview could and could not settle, and then the full-page run the
+    decision was actually taken over, because those two steps are the product and a log that skipped
+    them would describe a cheaper thing than the one that ran.
     """
     entries: list[dict] = []
+    evidence = event.evidence or {}
 
     if event.attempt == 1:
         if event.trigger_reason:
@@ -499,6 +592,7 @@ def heal_log_entries(event: HealEvent) -> list[dict]:
         })
 
     entries.append({"kind": "heal", "text": "heal proposed — awaiting approval"})
+    entries.extend(_verification_entries(evidence))
 
     if event.verdict == HealVerdict.PASS:
         entries.append({
@@ -515,8 +609,34 @@ def heal_log_entries(event: HealEvent) -> list[dict]:
         })
 
     if event.status == HealStatus.APPROVED:
-        entries.append({"kind": "commit", "text": "fix approved and committed"})
+        entries.append({"kind": "commit", "text": "fix approved and saved to production"})
     elif event.status == HealStatus.REJECTED:
         entries.append({"kind": "commit", "text": "fix rejected — previous collector retained"})
 
     return entries
+
+
+def _verification_entries(evidence: dict) -> list[dict]:
+    """The steps between the gate and the verdict, in the order they happened.
+
+    Reads the sentences _event_evidence already stored rather than recomposing them, so the log and
+    the held card's evidence panel cannot end up describing the same heal differently. Silently
+    empty for an event written before any of this existed: an absent key means we do not know how
+    hard anyone looked, and printing a reassuring line for that is worse than printing nothing.
+
+    NO NEW `kind` VALUES. The five are a published contract - frontend/src/types.ts declares them as
+    a closed union and the receipt draws a glyph per kind, so a sixth ships as a blank circle in the
+    one place these lines are read. New steps therefore reuse the closest existing kind: reading a
+    page is a `run` whoever asked for it, and a judgement about the preview is a `verdict` even
+    though it is not the final one. Widening the union is a frontend change, not a reason to ship a
+    broken glyph.
+    """
+    lines = (
+        ("source_change", "heal", "source diff: {}"),
+        ("gate_decision", "verdict", "pre-filter: {}"),
+        ("verified_on", "run", "verdict taken over {}"),
+        ("draft_check", "run", "{}"),
+        ("verification_note", "commit", "{}"),
+    )
+    return [{"kind": kind, "text": template.format(evidence[key])}
+            for key, kind, template in lines if evidence.get(key)]
