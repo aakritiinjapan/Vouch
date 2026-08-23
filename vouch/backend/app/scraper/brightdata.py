@@ -51,6 +51,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import subprocess
 from dataclasses import dataclass
@@ -83,10 +84,50 @@ class HealProposal:
     diff_summary: str = ""           # the CLI's one-line summary; the structured diff is API-only
     view_url: str = ""               # the Scraper Studio page for this collector
     # True when proposed_records is a PREVIEW SAMPLE rather than a full run. The real gate always
-    # returns a sample (measured: 1 row against a 96-row baseline). The mock fixture is a full-size
-    # stand-in, so it is not one - and the guardian has to know the difference, or it reports the
-    # preview size as a finding.
+    # returns a sample; the mock fixture is a full-size stand-in, so it is not one - and the guardian
+    # has to know the difference, or it reports the preview size as a finding.
+    #
+    # Measured 2026-08-23 against six real heals: the gate returns TWO records plus an elision
+    # marker, not the "1 row against a 96-row baseline" this comment used to claim. That old number
+    # was the nested container being miscounted as a single row - see _flatten. Correcting it matters
+    # because a 1-row preview and a 2-row preview sit on opposite sides of nothing in particular, but
+    # believing the gate returns one row is what made the container bug invisible for so long.
     is_sample: bool = False
+    # How much of the page the gate actually showed, and how much there was to show.
+    #
+    #   preview_rows      records the gate handed over, i.e. len(proposed_records). The number of
+    #                     rows the guardian's verdict is actually based on.
+    #   population_rows   what the healed template would return over the whole page, when that is
+    #                     DERIVABLE - preview_rows plus the count carried in the gate's own
+    #                     "N more items" elision marker. None when no honest number exists.
+    #
+    # None means "unknown", never "nothing was elided". Absence of a marker does not prove the
+    # preview is complete; it only proves the gate did not say. Anything reasoning about evidence
+    # sufficiency has to treat None as the unknown it is - a wrong denominator would understate how
+    # little of the page was judged, which is the exact failure mode this pair exists to expose.
+    # Measured on the real gate: preview_rows=2, population_rows=30. The verdict was formed on 6.7%
+    # of the page, and until now nothing in the product could say so.
+    preview_rows: int = 0
+    population_rows: Optional[int] = None
+    # The RAW `diff` object from the AI-progress payload - {template_a, template_b}, the whole
+    # before/after template including its steps. Populated only when propose_heal(capture_diff=True),
+    # because the normal envelope throws it away and keeps `build_diff_summary`'s one-line
+    # "proposed template has N step(s)" instead. It is the only machine-readable evidence of WHAT the
+    # healer changed, and it costs nothing extra to ask for.
+    raw_diff: Optional[dict] = None
+    gate_status: str = ""            # the status string the CLI reported at the gate
+
+
+# The heal prompt cap, from the CLI's own PROMPT_MAX_LEN. Validated locally for the same reason the
+# 500-char description cap is: the CLI rejects an over-long prompt with a 400 AFTER the job has been
+# provisioned, so failing here costs nothing and failing there costs a job.
+MAX_HEAL_PROMPT_CHARS = 1000
+
+# What `heal` reports when it has stopped at the approval gate. Two spellings for one state: the
+# v0.3 envelope rewrites the raw progress status `pending_answer` as `awaiting_approval`, and
+# --legacy-output hands back the raw payload untouched. Accept both, or capture_diff breaks the gate
+# check that the whole pre-approval architecture rests on.
+_GATE_STATUSES = frozenset({"awaiting_approval", "pending_answer"})
 
 
 # --------------------------------------------------------------------------------------
@@ -138,8 +179,14 @@ def create_collector(url: str, description: str, *, name: Optional[str] = None,
     return collector_id
 
 
-def run(collector_id: str, url: str, _simulate: Optional[str] = None) -> list[dict]:
+def run(collector_id: str, url: str, _simulate: Optional[str] = None, *,
+        version: Optional[str] = None) -> list[dict]:
     """Run a collector against a URL and return the extracted rows.
+
+    `version` maps to the CLI's `--version <v>`, which becomes a `version=` query parameter on the
+    trigger call. Pass "dev" to run the DRAFT template - the one an approved-but-not-saved heal lands
+    in - instead of what production is serving. Default None keeps the production behaviour every
+    existing caller already has.
 
     _simulate (mock only): 'run_degraded' returns a run with price null on 6/8 rows, so the
     guardian's degradation check fires on real data and the heal is triggered by a measured fact
@@ -150,13 +197,15 @@ def run(collector_id: str, url: str, _simulate: Optional[str] = None) -> list[di
         return _fixture(_simulate or "baseline")
 
     # --sync keeps a single-URL run in one request; the CLI falls back to async past its server cap.
-    out = _cli("scraper", "run", collector_id, url, "--sync", "--json")
-    payload = json.loads(out)
+    args = ["scraper", "run", collector_id, url, "--sync", "--json"]
+    if version:
+        args += ["--version", version]
+    payload = json.loads(_cli(*args))
     return _rows(payload)
 
 
 def propose_heal(collector_id: str, prompt: str, url: str,
-                 _simulate: Optional[str] = None) -> HealProposal:
+                 _simulate: Optional[str] = None, *, capture_diff: bool = False) -> HealProposal:
     """
     Trigger a self-heal and return the PROPOSED rows without committing it.
 
@@ -171,20 +220,65 @@ def propose_heal(collector_id: str, prompt: str, url: str,
     We never pass --auto-approve. It exists, and it commits without the gate; using it would delete
     the thing this product is.
 
+    WHAT THE GATE ACTUALLY RETURNS, measured against six real heals on 2026-08-23:
+
+        [ { "products": [ {tile 1}, {tile 2}, "28 more items" ] } ]
+
+    Not a flat row list. A single envelope record wrapping the container, holding two product dicts
+    and then a literal string standing in for the other 28. `_rows` unwraps the container and drops
+    the string; `_elided_rows` reads it. The result is `preview_rows=2, population_rows=30` - the
+    verdict is being formed on 6.7% of the page, and it is the FIRST 6.7%, which on a catalogue
+    sorted by price is not a random sample of anything.
+
+    That pair is the honest evidence base for the verdict, and callers should treat it as such: two
+    rows can carry a row-local finding (a missing field, a null spike, an inverted price/original
+    pair) but cannot carry a distributional one - the median of two biased rows is not a median. A
+    heal that previews clean on 2 of 30 rows has not been cleared, it has been under-tested.
+
+    `is_sample` stays True on every gate payload, unchanged. It is tempting to now derive it -
+    "sample iff population_rows > preview_rows" - and that would be wrong in the one direction that
+    matters: population_rows is None whenever the gate did not emit a readable marker, and None is
+    ignorance, not completeness. Deriving would silently promote an unknown-size preview to a full
+    run and re-enable the volume checks against it. True is the answer that cannot mislead here, and
+    anything wanting to be smarter has population_rows to be smarter WITH.
+
+    `capture_diff` adds `--legacy-output`, which makes the CLI emit the bare AI-progress payload
+    instead of its v0.3 envelope. That payload carries `diff` - the whole {template_a, template_b}
+    before/after, steps included - which the envelope discards in favour of the one-line
+    "proposed template has N step(s)". The diff is the only machine-readable record of WHAT the heal
+    changed, it needs no approval to read, and it costs nothing extra, so anything auditing heals
+    should ask for it. The trade is that the legacy payload reports the raw status `pending_answer`
+    rather than `awaiting_approval` and carries no view_url, both handled below.
+
     _simulate (mock only): 'healed_good' | 'healed_swapped' - which fixture the fake heal returns,
     so the demo can deterministically produce either a clean heal or the dangerous swap.
     """
+    if len(prompt) > MAX_HEAL_PROMPT_CHARS:
+        # Validated locally, like the 500-char description cap: the CLI's own PROMPT_MAX_LEN check
+        # rejects it with a 400, and by then the heal job may already have been provisioned.
+        raise ValueError(
+            f"heal prompt is {len(prompt)} chars; the CLI accepts at most {MAX_HEAL_PROMPT_CHARS}."
+        )
+
     if settings.mock_mode:
         key = _simulate or "healed_good"
-        return HealProposal(collector_id=collector_id, proposed_records=_fixture(key), pending=True)
+        rows = _fixture(key)
+        # The fixture is a full-size stand-in, not a preview - is_sample stays False - so here the
+        # population IS known, and known without a marker: it is the row count itself. This is the
+        # only path where population_rows may be filled in without one, and it is sound precisely
+        # because nothing was elided by construction.
+        return HealProposal(collector_id=collector_id, proposed_records=rows, pending=True,
+                            preview_rows=len(rows), population_rows=len(rows))
 
     # --url is cosmetic on `heal` (the docs note it is woven into the next_step hint, not sent to the
     # heal call), but passing it keeps the CLI's suggested follow-up command correct.
-    out = _cli("scraper", "heal", collector_id, prompt, "--url", url, "--json")
-    envelope = json.loads(out)
+    args = ["scraper", "heal", collector_id, prompt, "--url", url, "--json"]
+    if capture_diff:
+        args.append("--legacy-output")
+    envelope = json.loads(_cli(*args))
 
     status = envelope.get("status")
-    if status != "awaiting_approval":
+    if status not in _GATE_STATUSES:
         raise RuntimeError(
             f"heal did not stop at the approval gate (status={status!r}). Vouch cannot validate a "
             f"heal that has already been committed - check that --auto-approve was not passed."
@@ -197,16 +291,77 @@ def propose_heal(collector_id: str, prompt: str, url: str,
             f"{sorted(envelope)}"
         )
 
-    return HealProposal(collector_id=collector_id, proposed_records=_rows(proposed),
-                        pending=True, diff_summary=envelope.get("diff_summary", ""),
-                        view_url=envelope.get("view_url", ""), is_sample=True)
+    raw_diff = envelope.get("diff") if isinstance(envelope.get("diff"), dict) else None
+    summary = envelope.get("diff_summary", "")
+    if not summary and raw_diff is not None:
+        # Rebuild what the envelope would have said, so callers see the same string either way.
+        steps = raw_diff.get("template_b", {})
+        steps = steps.get("steps") if isinstance(steps, dict) else None
+        if isinstance(steps, list):
+            summary = f"proposed template has {len(steps)} step(s) - review at view_url"
+
+    # Read the population BEFORE flattening: the elision markers live in the raw payload, and
+    # flattening is what strips them out.
+    records = _rows(proposed)
+    elided = _elided_rows(proposed)
+
+    return HealProposal(collector_id=collector_id, proposed_records=records,
+                        pending=True, diff_summary=summary,
+                        view_url=envelope.get("view_url")
+                        or f"https://brightdata.com/cp/scrapers/{collector_id}",
+                        is_sample=True, preview_rows=len(records),
+                        population_rows=None if elided is None else len(records) + elided,
+                        raw_diff=raw_diff, gate_status=str(status))
 
 
-def approve_heal(collector_id: str) -> None:
-    """Commit the pending heal. The collector id is unchanged - it keeps working, now fixed."""
+def approve_heal(collector_id: str, *, save_to_production: bool = False) -> None:
+    """Accept the pending heal. The collector id is unchanged - it keeps working, now fixed.
+
+    WHERE THE ACCEPTED TEMPLATE LANDS, and why the default is what it is.
+
+    VERIFIED, by reading @brightdata/cli v0.3.5 `dist/commands/scraper.js` directly:
+
+        // resume_and_poll, ~line 385
+        const resume_body = approve && opts.autoSave
+            ? { message: approve, auto_save: true }
+            : { message: approve };
+
+    and `--auto-save` is a registered option on the `approve` subcommand ("Save the approved template
+    automatically once the job completes successfully (sent as auto_save to the resume call)"), which
+    is what populates `opts.autoSave`. So the mechanism is not in doubt: without the flag the resume
+    body is `{message: true}` and nothing asks for a save. This function sent no such flag before
+    `save_to_production` existed, and still sends none by default.
+
+    INFERRED, and NOT confirmed here: that an approve without auto_save therefore leaves PRODUCTION
+    serving the old template. This comes from Bright Data's docs describing an accepted change as
+    landing in a draft until an explicit "Save to Production", not from an observed approve. The CLI
+    source is silent on it - it never says the words draft or production - so the source proves what
+    is sent, not what the API does with it.
+
+    Weak corroboration, worth exactly what it is: in every captured heal payload
+    (docs/research/heal_*.json) both sides of the diff carry `is_development: true` and
+    `status.value == "development"`, so the template the healer rewrites is a development template.
+    Consistent with a draft-then-publish model. Not proof, because those collectors may simply never
+    have had a published version to compare against.
+
+    `save_to_production=True` adds `--auto-save`. Default-off deliberately: flipping it would change
+    what every existing caller already does to a live collector, on the strength of an inference,
+    silently. That is the wrong way round - the caller who needs the heal to actually take effect is
+    the one who should say so.
+
+    The consequence for anything that approves and then assumes the fix is live: it probably is not.
+    `run(collector_id, url, version="dev")` reads the draft, which is the cheap way to see the
+    healed template's real output without publishing it. scripts/heal_lab.py is built to settle the
+    inference outright - it fingerprints production, approves, and re-runs production to see whether
+    the fingerprint moved - but the 2026-08-23 study rejected every heal it proposed, so that check
+    has not yet produced an answer. Until it does, this stays labelled inferred.
+    """
     if settings.mock_mode:
         return
-    _cli("scraper", "approve", collector_id, "--json")
+    args = ["scraper", "approve", collector_id, "--json"]
+    if save_to_production:
+        args.append("--auto-save")
+    _cli(*args)
 
 
 def reject_heal(collector_id: str) -> None:
@@ -227,6 +382,25 @@ _META_KEYS = frozenset({"input", "timestamp", "error", "error_code", "warning", 
 # catalogue in CAD, so a proxy-region change could silently poison price history with the wrong
 # currency. Refusing is the only safe response: a guardian that accepts CAD as USD is worse than one
 # that stops.
+#
+# ASSESSED, and left as a raise on purpose. The objection is real: `_rows` raising here is a hard
+# stop in the INGESTION layer, so a legitimately multi-currency page takes down the whole cycle
+# rather than producing a verdict with a finding on it - no evidence, no code, no counterfactual,
+# just a traceback where an answer should be. That is a denial of service on the product, and it is
+# self-inflicted. Three things say keep it anyway:
+#   * the alternative is not "a finding" but "a finding nobody wrote". Downgrading it means teaching
+#     the guardian a currency check, which is Tier-1 work in someone else's module; a raise here and
+#     a check there are not interchangeable, and quietly deleting the raise would leave a window with
+#     nothing in it at all.
+#   * the blast radius is bounded by scope. Vouch prices ONE storefront per product against ONE
+#     baseline. A page that legitimately quotes two currencies is not this collector's page; if it
+#     ever is, the baseline is already meaningless and stopping is the correct outcome.
+#   * the failure it prevents is silent and permanent - CAD written into price history as USD is not
+#     recoverable by re-running, because nothing downstream records which it was.
+# What it should NOT do is fire on metadata: `_currencies` walks the entire payload, including any
+# envelope fields the CLI adds around the rows, so an account-level currency appearing in some future
+# envelope would trip a data guard on a non-data field. Not observed in any captured payload, and not
+# worth pre-emptively narrowing on a guess, but it is where this will break first.
 EXPECTED_CURRENCY = "USD"
 
 
@@ -242,6 +416,138 @@ def _scalarise(value: object) -> object:
             if isinstance(candidate, (int, float)) and not isinstance(candidate, bool):
                 return candidate
     return value
+
+
+# The approval gate does not hand over the whole preview. It hands over the first few records and
+# then elides the rest behind a literal string sitting in the same list, as a peer of the records:
+#
+#     [ { "products": [ {tile 1}, {tile 2}, "28 more items" ] } ]
+#
+# Two things follow, and the second is the valuable one.
+#   1. The string is not a row. Left in place it reaches the guardian as data, where profile_run
+#      would treat a str as a product record. It has to be dropped.
+#   2. The string is the ONLY place the gate says how big the real page is. Two records plus
+#      "28 more items" means the healed template would produce 30 rows, not 2. That is the
+#      denominator for every honest statement about how much of the page a verdict rests on, and
+#      the product used to throw it away.
+#
+# Anchored at both ends and digits-only on purpose - see _elided_count.
+_ELIDED_MARKER = re.compile(r"^(\d+)\s+more\s+items?$", re.IGNORECASE)
+
+
+def _elided_count(value: object) -> Optional[int]:
+    """Read the gate's row-elision marker as a number, or None if it is not unambiguously one.
+
+    Strict by design, because the number leaves this module as evidence. A verdict that says "judged
+    2 of 30 rows" is only worth more than silence if the 30 is right; a fabricated denominator would
+    make a badly-undersampled heal look adequately sampled, which is worse than admitting we do not
+    know. So anything that is not exactly "<digits> more item(s)" returns None and the caller reports
+    no population at all.
+
+    Deliberately NOT accepted, each because reading it would mean guessing:
+      "1,234 more items"   a thousands separator is locale-dependent; 1,234 is not unambiguously
+                           1234 in every locale this string could have been formatted in.
+      "many more items"    no number to read.
+      "28 items"           does not say the 28 are ADDITIONAL to the ones shown, and the whole value
+                           of the marker is that it is an increment.
+      "28 more items (truncated)"  an unrecognised suffix means an unrecognised format; the shape we
+                           validated is not the shape we were handed.
+
+    Case and surrounding whitespace ARE tolerated: neither changes what the number means, so
+    rejecting them would be strictness without a safety argument.
+    """
+    if not isinstance(value, str):
+        return None
+    match = _ELIDED_MARKER.match(value.strip())
+    return int(match.group(1)) if match else None
+
+
+def _container_records(value: object) -> Optional[list[dict]]:
+    """If this field's value is a list of RECORDS, return just the records; otherwise None.
+
+    This is the structural test that decides what a container is, and it is where the nested-preview
+    bug lived. The old test was `all(isinstance(i, dict) for i in v)` - which the real gate payload
+    fails, because its `products` list ends in the literal string "28 more items". One non-record
+    entry demoted the entire container to an ordinary field value, so `_rows` returned a single row
+    whose only key was `products` and the guardian dutifully reported FIELD_MISSING / FAIL 0-100. It
+    caught a genuinely dangerous heal for entirely the wrong reason, and would have told the operator
+    that `price` had vanished when in truth `price` held the delivery charge.
+
+    THE RULE: a list is the record container if it holds at least one dict. Non-dict entries are
+    discarded rather than disqualifying the list.
+
+    Why that rule and not a narrower one. The narrow alternative - "only tolerate entries that parse
+    as the elision marker" - hardcodes today's marker text into the definition of a container, so the
+    day Bright Data rewords it to "and 28 more" the bug returns in exactly the form it has now: silent
+    and diagnosed as something else. The rule here degrades instead: an unrecognised entry costs us
+    the population count (_elided_rows refuses to guess) but never costs us the rows. Discarding a
+    non-dict is safe on its own terms too - a scalar cannot be profiled as a record no matter what we
+    decide it means.
+
+    WHERE THIS RULE IS WRONG. It cannot tell a list of PRODUCTS from a list of DETAILS belonging to
+    one product. Given {"name": "RTX 5090", "price": ..., "variants": [{...}, {...}]} it treats the
+    variants as the records and emits two rows, carrying the outer name and price onto both - one
+    product counted twice, its price double-weighted in every median the guardian takes. That
+    ambiguity is not introduced here; `_flatten` has always behaved this way for all-dict lists, and
+    the fix for it is not available structurally, because "one list of dicts hanging off a record" is
+    the same shape in both cases. Resolving it needs something this layer does not have: the
+    baseline's field names, against which `variants` is an unknown container and `products` is the
+    one the baseline was built from. Left alone deliberately - the live Newegg collector's shape
+    ({graphics_cards: [...], product_page_url: ...}) is only correct BECAUSE outer fields are carried
+    onto container items, so narrowing the rule to "the container must be the record's sole key"
+    would break a verified-good shape to fix a hypothetical one.
+    """
+    if not isinstance(value, list):
+        return None
+    records = [item for item in value if isinstance(item, dict)]
+    return records or None
+
+
+def _elided_rows(payload: object) -> Optional[int]:
+    """How many records the gate hid behind elision markers, or None when that cannot be known.
+
+    Walks every record-bearing list in the payload and adds up its markers. Returns None - not 0 - in
+    two distinct situations that a caller must treat identically:
+
+      * no marker anywhere. This does NOT mean nothing was elided. It means the payload never said,
+        and a full preview and a silently-truncated one are indistinguishable from here.
+      * a marker that _elided_count refuses to read. One unreadable marker poisons the whole count,
+        because a partial sum is a confident understatement of the population - the single worst
+        answer available, since it would make the sample look larger a fraction of the page than it
+        is.
+
+    Only lists that hold at least one dict are inspected, matching _container_records: a marker is a
+    peer of the records it stands for, so a list with no records has nothing to elide, and a list of
+    plain strings elsewhere in the payload is not evidence about row counts.
+    """
+    total = 0
+    found = False
+    unreadable = False
+
+    def walk(node: object) -> None:
+        nonlocal total, found, unreadable
+        if isinstance(node, dict):
+            for value in node.values():
+                walk(value)
+            return
+        if not isinstance(node, list):
+            return
+        records = [item for item in node if isinstance(item, dict)]
+        if records:
+            for item in node:
+                if isinstance(item, dict):
+                    continue
+                count = _elided_count(item)
+                if count is None:
+                    unreadable = True
+                else:
+                    total += count
+                    found = True
+        for record in records:
+            walk(record)               # containers nest; so do their markers
+
+    walk(payload)
+    return None if unreadable or not found else total
 
 
 def _currencies(payload: object) -> set[str]:
@@ -268,6 +574,11 @@ def _flatten(rows: list[dict]) -> list[dict]:
 
     Fields on the outer row that are NOT the container (e.g. `product_page_url`) are carried onto each
     product, since they describe it.
+
+    What counts as a container is `_container_records`, and its docstring is the one to read: it
+    holds the rule, the reason the gate's real payload used to defeat it, and the case where it is
+    wrong. The split below is deliberately written as one pass so the two halves stay exact
+    complements - a field silently missing from both `carried` and `containers` would drop data.
     """
     out: list[dict] = []
     for row in rows:
@@ -275,10 +586,14 @@ def _flatten(rows: list[dict]) -> list[dict]:
             continue
 
         payload = {k: v for k, v in row.items() if k not in _META_KEYS}
-        containers = [v for v in payload.values()
-                      if isinstance(v, list) and v and all(isinstance(i, dict) for i in v)]
-        carried = {k: _scalarise(v) for k, v in payload.items()
-                   if not (isinstance(v, list) and v and all(isinstance(i, dict) for i in v))}
+        containers: list[list[dict]] = []
+        carried: dict = {}
+        for key, value in payload.items():
+            records = _container_records(value)
+            if records is None:
+                carried[key] = _scalarise(value)
+            else:
+                containers.append(records)
 
         if not containers:
             out.append(carried)
@@ -297,6 +612,20 @@ def _rows(payload: object) -> list[dict]:
 
     The run and heal envelopes differ and have both changed shape across CLI releases, so accept a
     bare list or any of the documented wrapper keys rather than guessing one and breaking on the day.
+
+    Two layers of wrapping, and they are independent:
+      1. the ENVELOPE - a bare list, or a dict under one of the keys below. Handled here.
+      2. the CONTAINER - the AI's own named list of records inside each envelope record, plus the
+         gate's "N more items" elision marker sitting alongside them. Handled by `_flatten` /
+         `_container_records`.
+
+    The Newegg collector returns a flat top-level array and exercises only (1); the healed Voltmart
+    collector nests under `products` and exercises both. Both must work, which is why (2) is a
+    property of each record rather than a special case for one envelope shape.
+
+    This function deliberately returns rows only. The elision marker carries a second fact - the size
+    of the population those rows were drawn from - and reading it is `_elided_rows`, kept separate
+    because `run()` has no use for it and only the gate ever emits one.
     """
     seen = _currencies(payload)
     unexpected = {c for c in seen if c.upper() != EXPECTED_CURRENCY}
