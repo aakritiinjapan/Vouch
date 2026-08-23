@@ -23,12 +23,18 @@ export type ScenarioId = "repricing" | "sale-audit";
 
 export interface ScenarioMeta {
   id: ScenarioId;
-  /** what the dropdown shows */
+  /** the tab label */
   label: string;
+  /** one line: what this example is */
+  headline: string;
   /** the pipeline this stands for, in the operator's words */
   pipeline: string;
   /** who loses money when the number is wrong */
   whoActs: string;
+  /** what breaks the scrape in this example - the reason a heal happens at all */
+  trigger: string;
+  /** what Vouch stopped, in one sentence, for the impact banner */
+  impact: string;
   /** the column header for harm - it means something different per scenario */
   riskLabel: string;
   /** what the entity column is listing */
@@ -40,18 +46,32 @@ export interface ScenarioMeta {
 export const SCENARIOS: ScenarioMeta[] = [
   {
     id: "repricing",
-    label: "E-Commerce Repricing (Live Demo)",
+    label: "① Competitive repricing",
+    headline: "A broken heal makes the seller lose money",
     pipeline: "Competitor price → our listing price",
-    whoActs: "the seller",
+    whoActs: "The seller",
+    trigger:
+      "The competitor changed their product tiles, the extraction broke, and the heal started " +
+      "reading the delivery cost into the price field.",
+    impact:
+      "Every one of these would have repriced a GPU against a shipping fee. Vouch held them " +
+      "before the change reached a live listing.",
     riskLabel: "Counterfactual risk",
     entityLabel: "Pipeline entity",
     source: "Newegg",
   },
   {
     id: "sale-audit",
-    label: "Sale Price Audit (Live Demo)",
+    label: "② Sale price audit",
+    headline: "A correct heal proves the shopper is being misled",
     pipeline: "Advertised was-price → shopper's discount",
-    whoActs: "the shopper",
+    whoActs: "The shopper",
+    trigger:
+      "The retailer relaid out its pages for a sale, the extraction broke, and the heal repaired " +
+      "it correctly — which is what makes the new was-price checkable at all.",
+    impact:
+      "Each price really did fall. The crossed-out number it is measured from was never charged, " +
+      "and only a dated record from before the sale can show that.",
     riskLabel: "Overstated discount",
     entityLabel: "Product audited",
     source: "Voltmart",

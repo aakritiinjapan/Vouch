@@ -1,17 +1,20 @@
 /**
- * The app shell: three surfaces behind a tiny hash router.
+ * The app shell: four surfaces behind a tiny hash router.
  *
- * `/` → Hero (dark pitch), `/console` → the one-decision console, `/trust-api` → the verdict as a
- * stateless API. All console state lives in useVouch; the Verdict Seal and the `view as API →` bridge
- * are what tie the three surfaces into one story.
+ * `/` → Hero (what Vouch is), `/console` → the one-decision console (the product), `/examples` → the
+ * two worked examples (the argument that the layer generalises), `/trust-api` → how to consume the
+ * verdict yourself. All console state lives in useVouch; the Verdict Seal and the `view as API →`
+ * bridge are what tie the surfaces into one story.
  */
 
 import { Nav } from "./components/Nav";
 import { useRoute } from "./hooks/useRoute";
 import { useVouch } from "./hooks/useVouch";
 import { Console } from "./pages/Console";
+import { Examples } from "./pages/Examples";
 import { Hero } from "./pages/Hero";
 import { TrustApi } from "./pages/TrustApi";
+import type { ScenarioId } from "./scenario";
 import type { Proposal } from "./types";
 import type { ScenarioKey } from "./trustSamples";
 
@@ -54,6 +57,7 @@ export default function App() {
           onResume: () =>
             vouch.runCycle({ simulate_run: "run_degraded", simulate_heal: "healed_swapped" }),
           onReset: vouch.resetDemo,
+          onOpenExample: (id: ScenarioId) => navigate("examples", { case: id }),
         }
       : undefined;
 
@@ -84,6 +88,12 @@ export default function App() {
         <TrustApi
           initialScenario={(route.params.get("scenario") as ScenarioKey) ?? undefined}
           bridgedFrom={route.params.get("from")}
+        />
+      ) : route.view === "examples" ? (
+        <Examples
+          held={vouch.held}
+          healEvents={vouch.healEvents}
+          initialCase={(route.params.get("case") as ScenarioId) ?? undefined}
         />
       ) : (
         <Console

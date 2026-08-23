@@ -1,12 +1,15 @@
 /**
- * Tiny hash-based router. No dependency, no history rewrites — the whole app is three surfaces and a
+ * Tiny hash-based router. No dependency, no history rewrites — the whole app is four surfaces and a
  * couple of query params ("view as API" preloads a scenario), which a hash handles without pulling in
- * react-router. `#/` → hero, `#/console` → console, `#/trust-api?scenario=column-swap` → Trust API.
+ * react-router. `#/` → hero, `#/console` → console, `#/examples?case=sale-audit` → the worked
+ * examples, `#/trust-api?scenario=column-swap` → Trust API.
  */
 
 import { useCallback, useEffect, useState } from "react";
 
-export type View = "home" | "console" | "trust-api";
+export type View = "home" | "console" | "examples" | "trust-api";
+
+const VIEWS: View[] = ["console", "examples", "trust-api"];
 
 export interface Route {
   view: View;
@@ -16,8 +19,8 @@ export interface Route {
 function parse(): Route {
   const hash = window.location.hash.replace(/^#/, "");
   const [path, query = ""] = hash.split("?");
-  const clean = path.replace(/^\//, "");
-  const view: View = clean === "console" ? "console" : clean === "trust-api" ? "trust-api" : "home";
+  const clean = path.replace(/^\//, "") as View;
+  const view: View = VIEWS.includes(clean) ? clean : "home";
   return { view, params: new URLSearchParams(query) };
 }
 

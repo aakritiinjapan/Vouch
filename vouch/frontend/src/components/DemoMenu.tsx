@@ -20,6 +20,8 @@ export interface DemoMenuProps {
   onReplay: (healKey: string) => void;
   onResume: () => void;
   onReset: () => void;
+  /** Open a worked example. The two cases live on their own page, not in the console. */
+  onOpenExample?: (id: "repricing" | "sale-audit") => void;
 }
 
 interface MenuItem {
@@ -30,7 +32,15 @@ interface MenuItem {
   run: () => void;
 }
 
-export function DemoMenu({ hints, busy, onRunCycle, onReplay, onResume, onReset }: DemoMenuProps) {
+export function DemoMenu({
+  hints,
+  busy,
+  onRunCycle,
+  onReplay,
+  onResume,
+  onReset,
+  onOpenExample,
+}: DemoMenuProps) {
   const [open, setOpen] = useState(false);
   const wrapRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
@@ -53,6 +63,24 @@ export function DemoMenu({ hints, busy, onRunCycle, onReplay, onResume, onReset 
       run: onResume,
     },
     { key: "reset", label: "↻ Reset demo", run: onReset },
+    // The two worked examples. They navigate rather than simulate - the console stays one seller's
+    // live desk, and the argument for a second consumer is made on its own page.
+    ...(onOpenExample
+      ? ([
+          {
+            key: "example-repricing",
+            label: "→ Example ①: competitive repricing",
+            detail: "A broken heal makes the seller lose money",
+            run: () => onOpenExample("repricing"),
+          },
+          {
+            key: "example-sale-audit",
+            label: "→ Example ②: sale price audit",
+            detail: "A correct heal proves the shopper is being misled",
+            run: () => onOpenExample("sale-audit"),
+          },
+        ] as MenuItem[])
+      : []),
   ];
 
   const close = useCallback((returnFocus = true) => {

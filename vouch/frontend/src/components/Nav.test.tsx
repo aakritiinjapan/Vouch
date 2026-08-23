@@ -66,6 +66,27 @@ describe("Demo control", () => {
     ]);
   });
 
+  it("links both worked examples when a handler is supplied, after the simulation actions", async () => {
+    const onOpenExample = vi.fn();
+    render(
+      <Nav view="console" navigate={vi.fn()} demo={{ ...demoProps(), onOpenExample }} />,
+    );
+    await userEvent.click(screen.getByRole("button", { name: /demo/i }));
+
+    const labels = screen.getAllByRole("menuitem").map((i) => i.textContent ?? "");
+    expect(labels.at(-2)).toMatch(/example ①: competitive repricing/i);
+    expect(labels.at(-1)).toMatch(/example ②: sale price audit/i);
+
+    await userEvent.click(screen.getByRole("menuitem", { name: /sale price audit/i }));
+    expect(onOpenExample).toHaveBeenCalledWith("sale-audit");
+  });
+
+  it("omits the example links when no handler is supplied", async () => {
+    render(<Nav view="console" navigate={vi.fn()} demo={demoProps()} />);
+    await userEvent.click(screen.getByRole("button", { name: /demo/i }));
+    expect(screen.queryByRole("menuitem", { name: /example ①/i })).not.toBeInTheDocument();
+  });
+
   it("exposes the strip caption as a tooltip", () => {
     render(<Nav view="console" navigate={vi.fn()} demo={demoProps()} />);
     expect(screen.getByRole("tooltip")).toHaveTextContent(/simulate real scraping events/i);

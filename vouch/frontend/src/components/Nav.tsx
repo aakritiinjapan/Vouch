@@ -1,7 +1,7 @@
 /**
- * The shared top nav for the app surfaces (Console · Trust API), with the tenant identity always in
- * the top-right so a viewer never loses their place. One continuous dark surface — the hero shares
- * the same wordmark and identity treatment.
+ * The shared top nav for the app surfaces (Console · Examples · Trust API), with the tenant identity
+ * always in the top-right so a viewer never loses their place. One continuous dark surface — the hero
+ * shares the same wordmark and identity treatment.
  */
 
 import type { Navigate, View } from "../hooks/useRoute";
@@ -10,6 +10,7 @@ import { DemoMenu, type DemoMenuProps } from "./DemoMenu";
 
 const TABS: { view: View; label: string }[] = [
   { view: "console", label: "Console" },
+  { view: "examples", label: "Examples" },
   { view: "trust-api", label: "Trust API" },
 ];
 
