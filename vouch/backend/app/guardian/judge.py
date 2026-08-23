@@ -13,6 +13,13 @@ per held cycle, and none at all during the mocked demo.
 One request judges every field at once. N requests for N fields would be N times the latency and cost
 for strictly less context - the model can see, for instance, that `price` and `shipping` look swapped
 only if it is shown both.
+
+Bring-your-own-key, provider-agnostic. This module reads NO global config: the caller passes an
+`LLMConfig` (which provider, which model, whose key). That is what lets the same guardian run inside
+the repricer, a CI gate, or a stranger's pipeline on the public /verify surface without Vouch ever
+holding anyone's credentials or paying for anyone's tokens. `app.llm` builds an LLMConfig from the
+server's own settings for the internal repricer path; the public endpoint builds one from the
+caller's request + `X-LLM-Key` header.
 """
 
 from __future__ import annotations
@@ -21,15 +28,15 @@ import json
 import logging
 import random
 from dataclasses import dataclass, field
+from typing import Optional
 
 from pydantic import BaseModel
-
-from app.config import settings
 
 log = logging.getLogger(__name__)
 
 # What each field is supposed to MEAN. This is the ground truth the judge measures against, so it is
 # worth writing carefully - it is the only place the semantic intent of the schema is written down.
+# This is the repricer's DEFAULT; a caller with a different schema passes its own field_descriptions.
 FIELD_DESCRIPTIONS: dict[str, str] = {
     "name": "the product's full retail name, including brand and model",
     "price": (
@@ -51,6 +58,35 @@ FIELD_DESCRIPTIONS: dict[str, str] = {
 # How many sampled rows the judge must accept before its opinion counts either way.
 CONFIRM_THRESHOLD = 0.9      # at or above: the judge corroborates that the meaning survived
 REJECT_THRESHOLD = 0.6       # below: the judge confirms the doubt
+
+# Default model per provider, used when an LLMConfig names a provider but no model.
+_DEFAULT_MODELS = {
+    "anthropic": "claude-sonnet-4-6",
+    "openai": "gpt-4o-mini",
+}
+
+
+@dataclass
+class LLMConfig:
+    """How to reach a judge model - supplied by the caller, never read from global state.
+
+    `provider` is "anthropic" or "openai". "openai" also covers any OpenAI-compatible endpoint via
+    `base_url` (most providers expose one), which is what makes this provider-agnostic without an
+    adapter per vendor. `enabled` lets a caller force the deterministic-only path even with a key
+    present (the mocked demo does this).
+    """
+    provider: str = "anthropic"
+    api_key: str = ""
+    model: str = ""
+    base_url: Optional[str] = None
+    enabled: bool = True
+
+    @property
+    def usable(self) -> bool:
+        return self.enabled and bool(self.api_key)
+
+    def resolved_model(self) -> str:
+        return self.model or _DEFAULT_MODELS.get(self.provider, "")
 
 
 @dataclass
@@ -84,11 +120,11 @@ class _Assessment(BaseModel):
 
 
 _SYSTEM = (
-    "You validate scraped e-commerce data after an automatic extraction fix. A fix can return "
+    "You validate scraped data after an automatic extraction fix. A fix can return "
     "correctly-shaped values that mean the wrong thing - the shipping cost in the price column, a "
     "crossed-out list price instead of the sale price, a financing instalment instead of a total. "
     "Judge only whether each value plausibly represents its field's stated meaning. Do not judge "
-    "whether a price is high or low."
+    "whether a value is high or low, only whether it is the RIGHT KIND of value for the field."
 )
 
 _PROMPT = """Here are {n} sampled rows that an automatic fix just extracted:
@@ -103,21 +139,23 @@ For each field, report how many of the {n} shown values plausibly represent that
 
 def judge_fields(records: list[dict],
                  field_descriptions: dict[str, str] | None = None,
+                 config: LLMConfig | None = None,
                  sample_size: int = 15) -> JudgeResult:
     """Ask the model whether each field's values still mean what the field says.
 
-    Returns all-1.0 scores without calling out when running mocked or unconfigured, so the pipeline
-    stays offline and deterministic. `consulted` distinguishes "the judge approved" from "the judge
-    was never asked", which matters because only the former should move a verdict.
+    Returns all-1.0 scores without calling out when no usable `config` is given (the mocked demo,
+    or a public caller who brought no key), so the pipeline stays offline and deterministic.
+    `consulted` distinguishes "the judge approved" from "the judge was never asked", which matters
+    because only the former should move a verdict.
     """
     descriptions = field_descriptions or FIELD_DESCRIPTIONS
     # Only judge fields we actually have a stated meaning for and that are present in the data.
     present = {k for row in records for k in row}
     descriptions = {k: v for k, v in descriptions.items() if k in present}
 
-    if settings.mock_mode or not settings.anthropic_api_key or not records or not descriptions:
+    if config is None or not config.usable or not records or not descriptions:
         return JudgeResult(field_scores={k: 1.0 for k in descriptions},
-                           notes="judge not consulted (mock mode, no API key, or nothing to judge)",
+                           notes="judge not consulted (no usable LLM config, or nothing to judge)",
                            consulted=False)
 
     # Seed from a deterministic hash of the candidate records so the same proposal always
@@ -128,22 +166,13 @@ def judge_fields(records: list[dict],
     sample = rng.sample(records, min(sample_size, len(records)))
     rows = "\n".join(f"  {i + 1}. {json.dumps(row, default=str)}" for i, row in enumerate(sample))
     fields = "\n".join(f'  - "{name}": {desc}' for name, desc in descriptions.items())
+    user_prompt = _PROMPT.format(n=len(sample), rows=rows, fields=fields)
 
     try:
-        from anthropic import Anthropic
-
-        client = Anthropic(api_key=settings.anthropic_api_key)
-        response = client.messages.parse(
-            model=settings.llm_judge_model,
-            max_tokens=2000,
-            system=_SYSTEM,
-            messages=[{
-                "role": "user",
-                "content": _PROMPT.format(n=len(sample), rows=rows, fields=fields),
-            }],
-            output_format=_Assessment,
-        )
-        assessment = response.parsed_output
+        if config.provider == "openai":
+            assessment = _call_openai(config, user_prompt)
+        else:
+            assessment = _call_anthropic(config, user_prompt)
     except Exception as exc:                      # noqa: BLE001 - never let Tier 3 break a cycle
         # A judge that cannot be reached must not change a verdict. Fall back to "not consulted" so
         # the deterministic tiers stand on their own, and say so out loud in the log.
@@ -158,4 +187,44 @@ def judge_fields(records: list[dict],
         reasons[item.field_name] = item.reason
 
     return JudgeResult(field_scores=scores, reasons=reasons, consulted=True,
-                       notes=f"judged {len(sample)} sampled rows across {len(scores)} field(s)")
+                       notes=f"judged {len(sample)} sampled rows across {len(scores)} field(s) "
+                             f"via {config.provider}")
+
+
+# --------------------------------------------------------------------------------------
+# provider transports - each returns an _Assessment; only this layer is provider-specific
+# --------------------------------------------------------------------------------------
+
+def _call_anthropic(config: LLMConfig, user_prompt: str) -> _Assessment:
+    from anthropic import Anthropic
+
+    kwargs = {"api_key": config.api_key}
+    if config.base_url:
+        kwargs["base_url"] = config.base_url
+    client = Anthropic(**kwargs)
+    response = client.messages.parse(
+        model=config.resolved_model(),
+        max_tokens=2000,
+        system=_SYSTEM,
+        messages=[{"role": "user", "content": user_prompt}],
+        output_format=_Assessment,
+    )
+    return response.parsed_output
+
+
+def _call_openai(config: LLMConfig, user_prompt: str) -> _Assessment:
+    from openai import OpenAI
+
+    kwargs = {"api_key": config.api_key}
+    if config.base_url:
+        kwargs["base_url"] = config.base_url
+    client = OpenAI(**kwargs)
+    response = client.beta.chat.completions.parse(
+        model=config.resolved_model(),
+        messages=[
+            {"role": "system", "content": _SYSTEM},
+            {"role": "user", "content": user_prompt},
+        ],
+        response_format=_Assessment,
+    )
+    return response.choices[0].message.parsed

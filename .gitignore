@@ -32,10 +32,18 @@ vouch/testbed/preview/
 # Local Netlify folder
 .netlify
 
+# Scratch / capture artifacts
+pages_sc/
+.playwright-mcp/
+.githooks/*
+
 # Internal planning and notes — kept locally, not published
 AS-IS.md
 PRODUCT.md
 UI_PLAN.md
+vouch/docs/AS-IS.md
+vouch/docs/PRODUCT.md
+vouch/docs/UI_PLAN.md
 vouch/docs/BRIGHT_DATA_NOTES.md
 vouch/docs/DEMO_SCRIPT.md
 vouch/docs/LIVE_CAPTURE.md

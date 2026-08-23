@@ -208,6 +208,10 @@ export interface VerifyRequest {
   baseline_profiles?: Record<string, Record<string, unknown>>;
   baseline_count?: number;
   is_sample?: boolean;
+  /** Caller-supplied invariant pairs (lower, upper) — bring your own schema, not just prices. */
+  orderings?: [string, string][];
+  /** What each field is supposed to mean, for the optional Tier 3 judge. */
+  field_descriptions?: Record<string, string>;
   use_judge?: boolean;
   /** product name → the price confirmed before the current sale; only for a sale-claim audit */
   reference_prices?: Record<string, number>;

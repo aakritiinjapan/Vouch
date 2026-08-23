@@ -406,13 +406,26 @@ class BaselineProfileIn(BaseModel):
     sample: list[Any] = Field(default_factory=list)
 
 
+class VerifyLLMConfig(BaseModel):
+    """Bring-your-own-model config for the optional Tier 3 judge. The API KEY is never carried here -
+    it comes in the `X-LLM-Key` header so it stays out of request bodies and logs. Provider is
+    "anthropic" or "openai" ("openai" + base_url also reaches any OpenAI-compatible endpoint)."""
+    provider: str = "anthropic"
+    model: Optional[str] = None
+    base_url: Optional[str] = None
+
+
 class VerifyRequest(BaseModel):
     """A caller hands us the rows to judge and a reference to judge them against.
 
     The reference comes one of two ways, and exactly one must be given (validated in the route):
     `baseline_records` are raw last-known-good rows we profile server-side, and `baseline_profiles`
-    are profiles the caller already computed (e.g. read off a stored Baseline). Everything else is
-    optional and mirrors the knobs the internal guardian already exposes.
+    are profiles the caller already computed (e.g. read off a stored Baseline).
+
+    The schema is NOT pinned to the repricer. `orderings` (invariant pairs like ["price",
+    "original_price"]) and `field_descriptions` (what each field is supposed to MEAN, for the judge)
+    both default to Vouch's e-commerce schema but can be overridden, so any pipeline can bring its
+    own columns.
 
     `baseline_count` is inferred when omitted, from EITHER shape: from len(baseline_records) on the
     raw path, or from the profiles' own `count` on the precomputed path - so ROW_COUNT_SHIFT stays
@@ -437,7 +450,10 @@ class VerifyRequest(BaseModel):
     # whole page count as full evidence rather than being held for no reason. Bright Data states it
     # as a sentinel string in the gate payload ("28 more items"); scraper.brightdata parses it out.
     population_rows: Optional[int] = Field(default=None, ge=0)
+    orderings: Optional[list[tuple[str, str]]] = None      # (lower, upper) invariant pairs; own schema
+    field_descriptions: Optional[dict[str, str]] = None    # field -> meaning, for the Tier 3 judge
     use_judge: bool = False                                 # allow Tier 3 (no-op in mock / no key)
+    llm: Optional[VerifyLLMConfig] = None                  # which provider/model to judge with
     # product name -> the price confirmed BEFORE the current sale. Supply only when auditing a sale
     # claim; omitted, check_reference_price stands down. This is the one input that lets a caller ask
     # a question about the past rather than about our extraction.

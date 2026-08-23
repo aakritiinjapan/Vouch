@@ -29,6 +29,8 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Optional
 
+from app.parsing import coerce_number as _coerce_number
+
 
 # Below this many rows a median is an anecdote, not a distribution. Bright Data's heal gate returns a
 # preview SAMPLE, so any check that reasons about volume or spread has to stand down rather than
@@ -243,35 +245,6 @@ class CheckBattery(list):
 # Profiling
 # --------------------------------------------------------------------------------------
 
-def _coerce_number(v: Any) -> Optional[float]:
-    """Best-effort numeric parse: strips currency symbols, commas, whitespace.
-
-    Also unwraps the `{"value": 1999.99, "currency": "USD"}` shape. That is not a hypothetical
-    convenience - it is what Bright Data's approval gate actually returns for money fields
-    (docs/research/FINDINGS.md, defect 3). The scraper adapter flattens it before the battery sees
-    it, but the row-wise checks are also reachable from the public /verify endpoint with caller-
-    supplied records, and there `str({'value': 24.99})` parses to None: every comparison silently
-    skips, and check_value_ordering - the one check that catches a sale/original swap - reports
-    nothing at all on a whole catalogue. Silence that looks like a pass is precisely the failure
-    mode this module is being hardened against, so the unwrap belongs at the bottom, not upstream.
-    """
-    if v is None:
-        return None
-    if isinstance(v, bool):
-        # bool is a subclass of int. True would coerce to 1.0 and let an in_stock column be compared
-        # against a price, which is meaningless arithmetic dressed up as a measurement.
-        return None
-    if isinstance(v, (int, float)):
-        return float(v)
-    if isinstance(v, dict):
-        return _coerce_number(v.get("value")) if "value" in v else None
-    s = str(v).strip().replace(",", "").replace("$", "").replace("€", "").replace("£", "")
-    try:
-        return float(s)
-    except ValueError:
-        return None
-
-
 def _infer_dtype(values: list[Any]) -> str:
     non_null = [v for v in values if v not in (None, "")]
     if not non_null:
@@ -397,13 +370,17 @@ def check_type_flip(baseline: dict[str, FieldProfile], proposed: dict[str, Field
             continue                      # nothing left to have a type - check_null_rate owns that
         example = next((repr(v) for v in prop.sample), "(no example)")
         out.append(CheckResult(
-            False, Severity.HIGH, name, "TYPE_CHANGED",
+            False, Severity.HIGH, name, "DTYPE_CHANGED",
             f"'{name}' used to hold {base.dtype} values and now holds {prop.dtype} ones "
             f"(e.g. {example}) - the heal is reading a different element.",
             {"baseline_dtype": base.dtype, "proposed_dtype": prop.dtype,
              "example": prop.sample[:3]},
         ))
     return out
+
+
+# Alias for callers that use the origin/main naming convention.
+check_dtype_change = check_type_flip
 
 
 def check_record_count(baseline_count: int, proposed_count: int, tol: float = 0.5) -> list[CheckResult]:
@@ -640,8 +617,8 @@ def check_value_ordering(records: list[dict],
         out.append(CheckResult(
             False, Severity.CRITICAL, lower_name, "VALUE_ORDER_INVERTED",
             f"'{lower_name}' is above '{upper_name}' on {rate:.0%} of rows "
-            f"(e.g. {example[0]:g} vs {example[1]:g}). A sale price cannot exceed the price it is "
-            f"discounted from - these two fields have almost certainly been swapped.",
+            f"(e.g. {example[0]:g} vs {example[1]:g}) - '{lower_name}' must never exceed "
+            f"'{upper_name}', so these two fields have almost certainly been swapped.",
             {"lower": lower_name, "upper": upper_name, "inverted_rate": rate,
              "rows_checked": len(pairs), "example_lower": example[0], "example_upper": example[1]},
         ))
@@ -764,7 +741,8 @@ def _fmt_money(v: float) -> str:
 def run_all_checks(baseline_profiles: dict[str, FieldProfile], proposed_records: list[dict],
                    baseline_count: int, *, is_sample: bool = False,
                    population_rows: Optional[int] = None,
-                   reference_prices: Optional[dict[str, float]] = None) -> CheckBattery:
+                   reference_prices: Optional[dict[str, float]] = None,
+                   orderings: Optional[list[tuple[str, str]]] = None) -> CheckBattery:
     """Run the deterministic tiers (1 + 2).
 
     Returns a CheckBattery: one CheckResult per FAILURE, plus the Evidence describing how much was
@@ -791,6 +769,11 @@ def run_all_checks(baseline_profiles: dict[str, FieldProfile], proposed_records:
     sentinel states it exactly. Standing that check down for previews was only ever a workaround for
     not knowing the number.
 
+    `orderings` are the (lower, upper) invariant pairs the value-ordering tier enforces. It defaults
+    to FIELD_ORDERINGS (the repricer's price/original_price schema); a caller with a different schema
+    - the whole point of the public /verify surface - passes its own so the check is not pinned to
+    e-commerce prices.
+
     WHICH CHECKS SURVIVE A TWO-ROW PREVIEW - re-derived from measurement, 2026-08-23.
     The previous version of this list was written from first principles and one line of it was
     simply false. It claimed COLUMN_SWAP works on a preview because it "asks which distribution the
@@ -803,7 +786,7 @@ def run_all_checks(baseline_profiles: dict[str, FieldProfile], proposed_records:
       a full run does:
         FIELD_MISSING          a dropped field is visible in one row
         NULL_SPIKE             so is an empty one
-        TYPE_CHANGED           a value's kind is a property of the value
+        DTYPE_CHANGED          a value's kind is a property of the value
         VALUE_ORDER_INVERTED   price > original_price is decided within one row. This is the check
                                that caught the OTHER misleading heal in the study, from the gate.
 
@@ -865,7 +848,7 @@ def run_all_checks(baseline_profiles: dict[str, FieldProfile], proposed_records:
 
     results += check_column_swap(baseline_profiles, proposed_profiles)
     results += check_bool_ratio(baseline_profiles, proposed_profiles)
-    results += check_value_ordering(proposed_records)
+    results += check_value_ordering(proposed_records, orderings)
 
     # Deliberately NOT recorded as stood down when reference_prices is empty. `stood_down` means
     # "this check could have applied and we were unable to run it", which is a warning about the

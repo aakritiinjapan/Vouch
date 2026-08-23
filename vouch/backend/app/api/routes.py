@@ -9,7 +9,6 @@ there is never a second implementation of a rule hiding in a request handler.
 from __future__ import annotations
 
 import json
-from pathlib import Path
 from typing import Optional
 
 from fastapi import APIRouter, Body, Depends, Header, HTTPException, Query
@@ -19,9 +18,6 @@ from app import service
 from app.api import schemas
 from app.config import settings
 from app.db import session_dep
-from app.guardian import judge as guardian_judge
-from app.guardian.checks import FieldProfile, run_all_checks
-from app.guardian.verdict import REVIEW, apply_judge, decide
 from app.models import (
     Baseline,
     CompetitorObservation,
@@ -34,6 +30,7 @@ from app.scraper import baseline as baseline_capture
 from app.scraper.brightdata import fixture_path
 
 router = APIRouter()
+
 
 
 def _require_api_key(x_api_key: str = Header(default="")) -> None:
@@ -49,6 +46,7 @@ def _require_api_key(x_api_key: str = Header(default="")) -> None:
 # Profiling is O(rows x fields); /verify is a public, unauthenticated surface, so both caller-supplied
 # lists are capped rather than left to consume unbounded CPU. Well above any real preview or baseline.
 MAX_VERIFY_ROWS = 5000
+
 
 
 def _fixture_keys() -> set[str]:
@@ -105,114 +103,6 @@ _DATASET_NOTES = {
 def _fail(err: service.ServiceError):
     raise HTTPException(status_code=err.status_code,
                         detail={"detail": err.message, **err.detail})
-
-
-# --------------------------------------------------------------------------------------
-# trust layer - the stateless verdict primitive
-# --------------------------------------------------------------------------------------
-
-@router.post("/verify", response_model=schemas.VerifyResponse)
-def verify(body: schemas.VerifyRequest = Body(...)):
-    """Run the guardian over caller-supplied rows and return the raw verdict - nothing else.
-
-    This is the trust layer laid bare: no product, no baseline row, no pricing, no writes. It is the
-    same pure pipeline the orchestrator runs internally (run_all_checks -> decide -> apply_judge),
-    exposed so any pipeline can gate on Vouch's confidence score and risk brief without adopting the
-    repricer. Because it touches no database it takes no session dependency.
-    """
-    if not body.candidate_records:
-        raise HTTPException(422, detail={"detail": "candidate_records must be non-empty"})
-    if len(body.candidate_records) > MAX_VERIFY_ROWS:
-        raise HTTPException(422, detail={
-            "detail": f"candidate_records exceeds the {MAX_VERIFY_ROWS}-row limit"})
-    if body.baseline_records is not None and len(body.baseline_records) > MAX_VERIFY_ROWS:
-        raise HTTPException(422, detail={
-            "detail": f"baseline_records exceeds the {MAX_VERIFY_ROWS}-row limit"})
-    if body.reference_prices is not None and len(body.reference_prices) > MAX_VERIFY_ROWS:
-        raise HTTPException(422, detail={
-            "detail": f"reference_prices exceeds the {MAX_VERIFY_ROWS}-entry limit"})
-
-    has_records = body.baseline_records is not None
-    has_profiles = body.baseline_profiles is not None
-    if has_records == has_profiles:
-        raise HTTPException(422, detail={
-            "detail": "provide exactly one of baseline_records or baseline_profiles"})
-
-    # Build the baseline profiles the checks compare against, from whichever shape was given.
-    if has_records:
-        serialized, inferred_count = baseline_capture.capture(body.baseline_records)
-    else:
-        # BaselineProfileIn is a validated model now, not a bare dict, so unwrap it before
-        # FieldProfile.from_dict - which does cls(**d) and would otherwise be handed a model.
-        serialized = {name: prof.model_dump() for name, prof in body.baseline_profiles.items()}
-
-    # from_dict does cls(**d), so a caller-supplied profile with wrong/missing keys would raise a
-    # TypeError and escape as a 500. This endpoint ingests arbitrary caller data, so a malformed
-    # profile is a client error - surface it as 422.
-    try:
-        baseline_profiles = {name: FieldProfile.from_dict(prof) for name, prof in serialized.items()}
-    except (TypeError, ValueError) as exc:
-        raise HTTPException(422, detail={"detail": f"malformed baseline_profiles: {exc}"})
-
-    # An empty baseline is NO baseline, and it must never be scored. Every check compares the
-    # candidate against a NAMED baseline field, so with no fields the entire battery stands down:
-    # zero checks fire, zero failures come back, and decide() reads that silence as a clean run. The
-    # caller would be told `confirmed: true, confidence: 100` about rows that nothing ever looked at
-    # - the single worst answer a trust endpoint can give, and worse than an error, because it is
-    # actionable. Refuse the request instead.
-    #
-    # Tested on the PROFILES, not on the input list's length: `baseline_records=[{}, {}]` is a
-    # non-empty list that profiles to no fields at all, and a length check would wave it through.
-    if not baseline_profiles:
-        raise HTTPException(422, detail={
-            "detail": "baseline is empty - no fields to compare against, so no verdict is possible"})
-
-    # Infer the baseline row count when the caller omits it, from EITHER shape: len(records) on the
-    # raw path, the profiles' own count on the precomputed path. Defaulting to 0 would silently
-    # no-op check_record_count and hide a ROW_COUNT_SHIFT.
-    if body.baseline_count is not None:
-        baseline_count = body.baseline_count
-    elif has_records:
-        baseline_count = inferred_count
-    else:
-        baseline_count = max((p.count for p in baseline_profiles.values()), default=0)
-
-    results = run_all_checks(baseline_profiles, body.candidate_records, baseline_count,
-                             is_sample=body.is_sample,
-                             population_rows=body.population_rows,
-                             reference_prices=body.reference_prices)
-    verdict = decide(results)
-
-    judge_consulted = False
-    # TODO: a non-mock deployment must add auth + rate-limiting before enabling the paid Tier 3 judge
-    # on this public endpoint - use_judge currently only reaches a no-op judge under MOCK_MODE.
-    if body.use_judge and verdict.decision == REVIEW:
-        judge_result = guardian_judge.judge_fields(body.candidate_records)
-        verdict = apply_judge(verdict, judge_result)
-        judge_consulted = judge_result.consulted
-
-    return schemas.VerifyResponse(
-        decision=verdict.decision,
-        confirmed=verdict.confirmed,
-        confidence=verdict.confidence,
-        brief=verdict.brief,
-        failures=[
-            schemas.VerifyFailure(
-                code=f.code,
-                severity=f.severity.value,
-                field=f.field_name,
-                message=f.message,
-                evidence=f.evidence,
-            )
-            for f in verdict.failures
-        ],
-        judge_consulted=judge_consulted,
-        # Provenance travels with the verdict, always. A consumer gating on `confirmed` alone
-        # inherits exactly the blindness this product exists to remove - see VerifyResponse.
-        rows_judged=len(body.candidate_records),
-        full_battery=verdict.full_battery,
-        checks_stood_down=list(verdict.checks_stood_down),
-    )
 
 
 # --------------------------------------------------------------------------------------

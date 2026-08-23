@@ -52,13 +52,14 @@ from app.guardian.verdict import (
     FAIL,
     PARTIAL_EVIDENCE_CEILING,
     REVIEW,
-    Verdict,
     apply_judge,
     decide,
 )
+from app.llm import judge_config_from_settings
 from app.models import Baseline, Product
 from app.pricing import engine
 from app.scraper import brightdata
+from app.trust import Verdict, verify_rows
 
 # Hard cap on heal attempts per cycle. Two is deliberate: the demo needs exactly one re-prompt, and
 # every further attempt is a real Scraper Studio heal costing real credits against an AI-Flow
@@ -175,18 +176,22 @@ class CycleOutcome:
 # degradation gate
 # --------------------------------------------------------------------------------------
 
-def _degradation_reason(baseline: Baseline, baseline_profiles: dict[str, FieldProfile],
-                        records: list[dict]) -> Optional[str]:
+def _degradation_reason(baseline: Baseline, records: list[dict]) -> Optional[str]:
     """Why this run is worth healing, in the guardian's own words - or None if it looks fine.
 
-    Returns the failing check's message so HealEvent.trigger_reason and the event log's `run:` line
-    are a measured fact ("'price' is empty on 75% of rows") rather than a sentence someone typed.
+    Goes through the Trust API's verify_rows like every other check in the system, then reads the
+    failing check's message so HealEvent.trigger_reason and the event log's `run:` line are a measured
+    fact ("'price' is empty on 75% of rows") rather than a sentence someone typed.
     """
     if not records:
         return "The collector returned no rows at all."
-    results = run_all_checks(baseline_profiles, records, baseline_count=baseline.record_count)
-    for r in results:
-        if not r.passed and r.code in _DEGRADATION_CODES:
+    verdict = verify_rows(
+        candidate_records=records,
+        baseline_profiles=baseline.field_profiles,
+        baseline_count=baseline.record_count,
+    ).verdict
+    for r in verdict.failures:
+        if r.code in _DEGRADATION_CODES:
             return r.message
     return None
 
@@ -205,10 +210,8 @@ def run_cycle_for_product(product: Product, baseline: Baseline, *,
     `simulate_run`  : demo hook (mock only) - e.g. 'run_degraded' to trigger a heal on real nulls
     `simulate_heal` : demo hook (mock only) - a fixture key, or a per-attempt sequence of them
     """
-    baseline_profiles = {k: FieldProfile.from_dict(v) for k, v in baseline.field_profiles.items()}
-
     records = brightdata.run(product.collector_id, product.competitor_url, _simulate=simulate_run)
-    trigger_reason = _degradation_reason(baseline, baseline_profiles, records)
+    trigger_reason = _degradation_reason(baseline, records)
 
     # What production was serving BEFORE we touched anything. Kept because the draft probe needs a
     # "before" reading and this is one we have already paid for. It may well be the degraded run -
@@ -227,6 +230,10 @@ def run_cycle_for_product(product: Product, baseline: Baseline, *,
             # A heal was forced for the demo without a measured degradation. Say so plainly rather
             # than printing a null-rate the code never measured.
             trigger_reason = "Heal triggered manually (simulated for demo)."
+
+        # Deserialise once here; every _run_the_gate call in the loop shares the same objects.
+        baseline_profiles = {name: FieldProfile.from_dict(prof)
+                             for name, prof in baseline.field_profiles.items()}
 
         prompt = _heal_prompt(product)
         attempt = 0
@@ -494,6 +501,7 @@ def _judge_if_ambiguous(verdict: Verdict, records: list[dict]) -> Verdict:
     if verdict.decision != REVIEW:
         return verdict
     return apply_judge(verdict, judge.judge_fields(records))
+
 
 
 # --------------------------------------------------------------------------------------
@@ -841,7 +849,7 @@ def _extract_competitor_price(product: Product, records: list[dict],
     worse than none: pricing against the wrong product is precisely the harm this product prevents.
     So the fuzzy pass must clear _MATCH_THRESHOLD and must be an unambiguous winner.
     """
-    from app.guardian.checks import _coerce_number
+    from app.parsing import coerce_number as _coerce_number
 
     target = _normalise(product.name)
     if not target:
