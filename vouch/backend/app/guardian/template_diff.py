@@ -58,6 +58,17 @@ The defence is three-layered:
 The honest characterisation of the extractor: it recognises the idiom Bright Data's code generator
 actually emits, and it declines on everything else.
 
+One known gap, found by testing and left alone on purpose. `_resolve_expression` tries rule (1) -
+"a literal `.find('sel')` anywhere in this expression IS the answer" - before rule (2), the
+`new Money(value, currency)` first-argument-only rule. So rule (2)'s defence against attributing a
+currency lookup to a money field only bites when the constructor's arguments are LOCALS. Written
+inline, `new Money($item.find('.price-current').t(), $item.find('.ccy').t())` attributes both
+elements to `price`. All 30 `new Money(...)` calls across the six captured templates pass locals, so
+the shape does not occur; reordering the rules to close it would change how every real template
+resolves in order to fix a form none of them use. The gap costs a false POSITIVE - a page load and
+an overstated sentence - which is the direction this module is allowed to be wrong in. Pinned in
+tests/test_template_diff.py so it stays a documented limit rather than a surprise.
+
 Deliberate non-coupling
 -----------------------
 Nothing here imports `CheckResult`, `Severity` or `Verdict`. The guardian's result types are being
@@ -66,9 +77,62 @@ check: a check asks "are these values wrong", this asks "what did the heal chang
 different shapes. Integration is a thin adapter someone else writes over `TemplateDiff.to_dict()`;
 see the note at the bottom of this docstring for the recommended policy.
 
+THE LIMIT: this module cannot tell a correct swap from a wrong one, and no version of it will
+-----------------------------------------------------------------------------------------------
+The obvious next question is whether the source separates the study's correct swap from its wrong
+one. It looks like it might. Measured on the two payloads:
+
+    P1 (CORRECT)              price: '.price-current' -> ALSO '.price-ship', branching on whether
+                              the label text contains "shipping"; conditional_now=True, retained=True
+    MISLEAD-SHIPPING (WRONG)  price: '.price-current' -> '.price-ship', unconditional;
+                              conditional_now=False, retained=False
+    MISLEAD-CROSSED  (WRONG)  price <-> original_price, unconditional; conditional_now=False
+
+So `conditional_now` (equivalently `retained`) is 1/1 on the correct heal and 0/2 on the wrong ones.
+**We do not believe it, and it is not wired to anything.** Two reasons, and the second is the one
+that settles it:
+
+  1. n=3. FINDINGS.md already says the healer is untested for determinism and that the misleading
+     result is 2-for-2 rather than established. A rule fitted to one positive example gets promoted
+     from "evidence" to "judgement" the moment someone downstream finds it convenient, and then it
+     is load-bearing and nobody re-measures it.
+
+  2. It cannot be true, and this part is not an argument from sample size. Take the P1 page and
+     swap price and delivery in EVERY tile instead of only the first. The correct heal for that page
+     is `price := .price-ship`, unconditional - byte-identical in structure to the heal that was
+     wrong on the unswapped page. The two heals differ only in a fact about the MARKUP, and the
+     markup is not in the diff. A conditional says "I believe this page is inconsistent"; whether
+     that belief is right is a property of the page. The healer being agreeable is precisely the
+     failure mode under study, and an agreeable healer can write a confident conditional as easily
+     as a confident assignment - P1 proves it writes conditionals unprompted.
+
+What the conditional does honestly buy is a more precise sentence for the human: "still reads
+'.price-current', now ALSO reads '.price-ship' when the label says Shipping" is a claim an operator
+can check against one tile. That is why `FieldChange.describe()` renders it and why nothing scores
+it. If a future study ever gets n into double figures per condition, this paragraph is the thing to
+come back and overturn - with numbers, not with a third example.
+
 Recommended integration policy (argued, not merely stated)
 ----------------------------------------------------------
-Selector evidence should be a strong ESCALATOR and never, on its own, a rejection:
+The conclusion reached 2026-08-23 and implemented in `orchestrator._publishable`: this evidence
+belongs at the ORCHESTRATOR, as an escalator, and NOT in `guardian/checks.py` as a `CheckResult`.
+Three reasons, in increasing order of how hard they are to work around:
+
+  - A CheckResult is scored. `verdict.decide` FAILs on any CRITICAL and REVIEWs on any HIGH, and
+    `_score` charges 10 points for a MEDIUM. A MEDIUM repoint finding cannot reject a heal by
+    itself, but stacked on other findings it can be the ten points that carries a heal from REVIEW
+    to FAIL - and P1 is the heal it would carry. "Cannot reject alone" is not the same property as
+    "cannot cast the deciding vote in a rejection", and only the second one is safe here.
+  - `run_all_checks` takes baseline profiles and rows. It knows nothing about a heal, and the
+    /verify endpoint calls it for callers who have no heal and no diff at all. Threading a template
+    diff through it would put a heal-shaped parameter in the signature of every value-level check.
+  - `_verdict_over` runs the battery TWICE per heal - once at the gate, once over the full page. A
+    check would therefore re-report the same source finding after the full run, which is exactly the
+    point at which the orchestrator has decided the source gets no vote, because the values have by
+    then answered the question the source could only raise. Nothing about a check's lifecycle can
+    express "this evidence expires once the page has been re-read".
+
+Within that placement:
 
   - `has_cross_field_repoint` is the highest-value signal in here - a field now reading the element
     another field read before is the literal signature of the two heals that broke in the study. It
@@ -84,6 +148,10 @@ Selector evidence should be a strong ESCALATOR and never, on its own, a rejectio
   - COSMETIC and LOGIC_ONLY must stay silent. The healthy-page probe in the study changed only
     comments and added a defensive decimal guard; surfacing that as a change would teach operators
     that this evidence is noise, and they would then ignore the one time it is not.
+  - AN ADMISSION ESCALATES LIKE A FINDING. `is_semantic` is True when we could not read the diff,
+    not only when a field moved - see its docstring for why the alternative was the most dangerous
+    line in this file. Silence about a source we failed to parse is indistinguishable, at the point
+    of use, from silence about a source that said nothing changed.
 
 Usage
 -----
@@ -126,13 +194,32 @@ class ChangeClass(str, Enum):
 
 
 class ExtractionStatus(str, Enum):
-    """Why we do or do not have a field map. `OK` is the only value that carries claims."""
+    """Why we do or do not have a field map. `OK` is the only value that carries claims.
+
+    The split between NO_DIFF and everything below it is load-bearing, not tidiness. NO_DIFF means
+    *nothing was offered* - the caller never asked for `--legacy-output`, or the gate returned a
+    heal without one, which is every MOCK_MODE heal. The rest mean *something was offered and we
+    failed to read it*, and those two situations must never be collapsed: "there was no source" is a
+    fact about the request, "we could not read the source" is an admission about us, and only the
+    second one is a reason to go and look at the page. `TemplateDiff.could_not_read` is the line.
+    """
 
     OK = "ok"
     NO_DIFF = "no_diff"                    # raw_diff absent or not shaped like a legacy diff
+    INCOMPLETE_DIFF = "incomplete_diff"    # a diff arrived carrying only one of the two sides
     NO_PARSE_CODE = "no_parse_code"        # a side had no readable parse_code
     UNREADABLE_SOURCE = "unreadable_source"  # scanner hit an unterminated literal - refuse to guess
     UNRECOGNISED_SHAPE = "unrecognised_shape"  # no identifiable record-return object
+
+
+# A diff was returned and we could not turn it into a field map. Distinct from NO_DIFF, which is the
+# absence of a request rather than the failure of one - see the enum docstring.
+_UNREADABLE_STATUSES = frozenset({
+    ExtractionStatus.INCOMPLETE_DIFF,
+    ExtractionStatus.NO_PARSE_CODE,
+    ExtractionStatus.UNREADABLE_SOURCE,
+    ExtractionStatus.UNRECOGNISED_SHAPE,
+})
 
 
 @dataclass(frozen=True)
@@ -269,13 +356,61 @@ class TemplateDiff:
 
     # -- predicates the integrator will branch on -------------------------------------
     @property
-    def is_semantic(self) -> bool:
-        """At least one field demonstrably reads a different element. The actionable case."""
+    def has_demonstrated_repoint(self) -> bool:
+        """At least one field DEMONSTRABLY reads a different element.
+
+        The pure fact, with no policy in it. Nothing in the codebase should gate a page load on this
+        - use `is_semantic` for that - but a brief that wants to say "we read the source and it moved
+        a field" as opposed to "we could not read the source" needs the two separated.
+        """
         return self.classification is ChangeClass.REPOINTED
 
     @property
+    def could_not_read(self) -> bool:
+        """A diff was offered and we failed to extract a field map from it.
+
+        Note what this excludes: NO_DIFF, where no source was offered at all. Nothing was attempted,
+        so nothing was admitted, and treating the two alike would make every MOCK_MODE heal - which
+        never carries a diff - look like a parse failure.
+        """
+        return self.status in _UNREADABLE_STATUSES
+
+    @property
+    def is_semantic(self) -> bool:
+        """Does the SOURCE decline to clear this heal? The orchestrator's escalation contract.
+
+        CHANGED 2026-08-23, and the name now under-sells it, so read this before branching on it.
+        This used to be exactly `classification is REPOINTED`, i.e. "a field demonstrably moved".
+        The trouble is what the one consumer does with it: `orchestrator._publishable` reads
+        `not diff.is_semantic` as PERMISSION TO PUBLISH OFF THE GATE WITHOUT RE-READING THE PAGE. So
+        the question the property is actually being asked is not "did a field move" but "may we skip
+        the second look", and on that question an unreadable diff answered `False` - the same answer
+        as a heal that changed three comments.
+
+        That is the module's single worst failure mode expressed as one boolean. `UNREADABLE_SOURCE`
+        means we know nothing, and "we know nothing" was being spent as "nothing changed". An
+        upstream response-shape change - which is the likeliest way this module ever breaks, since
+        `--legacy-output` is undocumented - would have silently switched the escalation off for every
+        heal at once, with no failing test and nothing in the brief to notice.
+
+        So: a repoint escalates, and so does an admission. `COSMETIC`, `IDENTICAL`, `LOGIC_ONLY` and
+        `NO_DIFF` do not, and those are the four that carry an actual claim of "nothing moved". The
+        cost of the change is one page load on a heal whose source we could not parse; the cost of
+        the old behaviour is the whole verification step, skipped without saying so.
+        """
+        return self.has_demonstrated_repoint or self.could_not_read
+
+    @property
     def is_cosmetic(self) -> bool:
-        """Nothing but comments and whitespace moved. Must never surface as a warning."""
+        """Nothing but comments and whitespace moved. Must never surface as a warning.
+
+        Deliberately NOT the complement of `is_semantic`; `LOGIC_ONLY` is neither, and that gap is
+        the point. The study's healthy-page probe added a decimal guard and rewrote comments: real
+        code changed, no field moved. Calling that cosmetic would overstate our reading of it, and
+        calling it semantic would spend a page load on a heal the source has cleared. It is a third
+        thing, and the only pair this class asserts is exhaustive is
+        `is_semantic or is_cosmetic or LOGIC_ONLY or (NO_DIFF, which asserts nothing)`.
+        """
         return self.classification in (ChangeClass.IDENTICAL, ChangeClass.COSMETIC)
 
     @property
@@ -298,6 +433,11 @@ class TemplateDiff:
 
     def bullets(self) -> list[str]:
         """Operator-facing lines. Empty when we have nothing worth saying, which is most of the time."""
+        if self.could_not_read:
+            # An escalating diff that renders as zero bullets is an operator staring at an extra page
+            # load with no stated cause. The admission IS the line - it says what we tried, what we
+            # got, and what has to answer instead.
+            return [self.summary]
         if self.classification in (ChangeClass.IDENTICAL, ChangeClass.COSMETIC, ChangeClass.UNKNOWN):
             return []
         out: list[str] = []
@@ -325,6 +465,11 @@ class TemplateDiff:
             "classification": self.classification.value,
             "summary": self.summary,
             "semantic": self.is_semantic,
+            # Both, because they answer different questions and only one of them is policy. A
+            # renderer showing `semantic` alone cannot tell "a field moved" from "we could not read
+            # it", and those two deserve different sentences in front of a human.
+            "demonstrated_repoint": self.has_demonstrated_repoint,
+            "could_not_read": self.could_not_read,
             "cosmetic": self.is_cosmetic,
             "cross_field_repoint": self.has_cross_field_repoint,
             "swapped_pairs": [list(p) for p in self.swapped_pairs],
@@ -1006,14 +1151,45 @@ def _line_change_counts(a: str, b: str, blank_a: Optional[str], blank_b: Optiona
     return comment_lines, code_lines
 
 
-def _normalised(blank: str) -> str:
-    """Comment-free, whitespace-insensitive source. Equality here means 'cosmetic change only'."""
-    lines = []
-    for line in blank.splitlines():
-        collapsed = " ".join(line.split())
-        if collapsed:
-            lines.append(collapsed)
-    return "\n".join(lines)
+def _code_signature(src: str, blank: str) -> str:
+    """Comment-free source with LITERAL CONTENTS INTACT and out-of-literal whitespace collapsed.
+
+    Equality of two signatures is the only thing this module accepts as proof that a change was
+    cosmetic, so it has to be built from the original text and not from the blanked twin.
+
+    The bug this replaces was live and it was the worst one in the file. The old version normalised
+    the BLANKED text, in which every string literal has had its contents replaced by NUL while
+    keeping its length. Two selectors of equal length are therefore byte-identical after blanking:
+
+        $item.find('.cost-now')     ->   $item.find('\\0\\0\\0\\0\\0\\0\\0\\0\\0')
+        $item.find('.cost-shp')     ->   $item.find('\\0\\0\\0\\0\\0\\0\\0\\0\\0')
+
+    A crossed price/shipping swap between two equally-named classes was classified COSMETIC and
+    summarised as "Comments and formatting only (0 lines); no code changed" - while the field map
+    sitting in the same object held both repoints. That is not a missed finding, which is merely
+    unhelpful; it is a confident denial, which is the one output this module is written to never
+    produce. Verified as a reproduction before the fix (see tests).
+
+    Whitespace inside a literal is preserved rather than collapsed, because it is part of the
+    selector; whitespace outside one is collapsed, because JavaScript does not care about it.
+    """
+    out: list[str] = []
+    pending_space = False
+    for i, ch in enumerate(blank):
+        if ch == _NUL:                        # inside a literal - take the real character
+            if pending_space and out:
+                out.append(" ")
+            pending_space = False
+            out.append(src[i])
+            continue
+        if ch.isspace():                      # comments are spaces by now, so they vanish here too
+            pending_space = True
+            continue
+        if pending_space and out:
+            out.append(" ")
+        pending_space = False
+        out.append(ch)
+    return "".join(out)
 
 
 def diff_templates(raw_diff: Any) -> TemplateDiff:
@@ -1028,13 +1204,28 @@ def diff_templates(raw_diff: Any) -> TemplateDiff:
     """
     if isinstance(raw_diff, dict) and "template_a" not in raw_diff and isinstance(raw_diff.get("diff"), dict):
         raw_diff = raw_diff["diff"]
-    if not isinstance(raw_diff, dict) or "template_a" not in raw_diff or "template_b" not in raw_diff:
+    has_a = isinstance(raw_diff, dict) and "template_a" in raw_diff
+    has_b = isinstance(raw_diff, dict) and "template_b" in raw_diff
+    if not has_a and not has_b:
         return TemplateDiff(ExtractionStatus.NO_DIFF, ChangeClass.UNKNOWN,
                             "No template diff was returned with this heal.")
+    if not (has_a and has_b):
+        # Half a diff is not the same event as no diff, and it used to report as one - "No template
+        # diff was returned", which is a false sentence about a response that plainly returned one,
+        # and which the orchestrator then drops from the record entirely because it files NO_DIFF as
+        # "nothing to say". A response carrying one side and not the other is a broken response;
+        # that is worth both saying and escalating, because the missing side is precisely the side
+        # that would have told us whether a field moved.
+        missing = "template_b" if has_a else "template_a"
+        return TemplateDiff(ExtractionStatus.INCOMPLETE_DIFF, ChangeClass.UNKNOWN,
+                            f"The heal diff is missing its '{missing}' side, so what the heal "
+                            f"changed cannot be read - judge this heal on its values alone.")
 
     src_a = _extract_parse_code(raw_diff.get("template_a"))
     src_b = _extract_parse_code(raw_diff.get("template_b"))
-    if not src_a or not src_b:
+    # `.strip()`, not truthiness: a parse_code of "   " is not source, and comparing two blank
+    # strings would otherwise return IDENTICAL - a clean bill of health issued about nothing.
+    if not (src_a or "").strip() or not (src_b or "").strip():
         return TemplateDiff(ExtractionStatus.NO_PARSE_CODE, ChangeClass.UNKNOWN,
                             "The heal diff carried no readable parser source.")
 
@@ -1050,7 +1241,7 @@ def diff_templates(raw_diff: Any) -> TemplateDiff:
 
     cosmetic_only = (
         blank_a is not None and blank_b is not None
-        and _normalised(blank_a) == _normalised(blank_b)
+        and _code_signature(src_a, blank_a) == _code_signature(src_b, blank_b)
     )
 
     notes = tuple(parsed_a.notes) + tuple(parsed_b.notes)
@@ -1078,10 +1269,24 @@ def diff_templates(raw_diff: Any) -> TemplateDiff:
     notes = notes + tuple(extra_notes)
     root_changed = parsed_a.root_selector != parsed_b.root_selector
 
-    if cosmetic_only:
-        classification = ChangeClass.COSMETIC
-    elif changes or root_changed:
+    # ORDER MATTERS, AND THE ORDER IS: EVIDENCE BEATS HEURISTIC.
+    #
+    # `changes` is a demonstration - two field maps, built the same way from both sides, that
+    # disagree about which element a field reads. `cosmetic_only` is a text heuristic. When they
+    # conflict, the heuristic is the one that is wrong, and the old code had it the other way round:
+    # `if cosmetic_only` won outright and buried a populated `field_changes` under the summary
+    # "Comments and formatting only; no code changed". Closing the blanking hole in
+    # `_code_signature` should make a conflict unreachable, which is exactly why this branch is
+    # written to survive one - a normaliser that goes wrong again must degrade into a spurious page
+    # load, never into a denial.
+    if changes or root_changed:
         classification = ChangeClass.REPOINTED
+        if cosmetic_only:
+            notes = notes + (
+                "the source normaliser called this change cosmetic while the field map shows a "
+                "repoint; reported as a repoint, and the disagreement is a bug in Vouch",)
+    elif cosmetic_only:
+        classification = ChangeClass.COSMETIC
     else:
         classification = ChangeClass.LOGIC_ONLY
 
