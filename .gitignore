@@ -31,3 +31,12 @@ vouch/testbed/preview/
 
 # Local Netlify folder
 .netlify
+
+# Internal planning and notes — kept locally, not published
+AS-IS.md
+PRODUCT.md
+UI_PLAN.md
+vouch/docs/BRIGHT_DATA_NOTES.md
+vouch/docs/DEMO_SCRIPT.md
+vouch/docs/LIVE_CAPTURE.md
+vouch/docs/MOTIVATION.md
