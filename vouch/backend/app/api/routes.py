@@ -131,7 +131,9 @@ def verify(body: schemas.VerifyRequest = Body(...)):
     if has_records:
         serialized, inferred_count = baseline_capture.capture(body.baseline_records)
     else:
-        serialized = body.baseline_profiles
+        # BaselineProfileIn is a validated model now, not a bare dict, so unwrap it before
+        # FieldProfile.from_dict - which does cls(**d) and would otherwise be handed a model.
+        serialized = {name: prof.model_dump() for name, prof in body.baseline_profiles.items()}
 
     # from_dict does cls(**d), so a caller-supplied profile with wrong/missing keys would raise a
     # TypeError and escape as a 500. This endpoint ingests arbitrary caller data, so a malformed
@@ -140,6 +142,19 @@ def verify(body: schemas.VerifyRequest = Body(...)):
         baseline_profiles = {name: FieldProfile.from_dict(prof) for name, prof in serialized.items()}
     except (TypeError, ValueError) as exc:
         raise HTTPException(422, detail={"detail": f"malformed baseline_profiles: {exc}"})
+
+    # An empty baseline is NO baseline, and it must never be scored. Every check compares the
+    # candidate against a NAMED baseline field, so with no fields the entire battery stands down:
+    # zero checks fire, zero failures come back, and decide() reads that silence as a clean run. The
+    # caller would be told `confirmed: true, confidence: 100` about rows that nothing ever looked at
+    # - the single worst answer a trust endpoint can give, and worse than an error, because it is
+    # actionable. Refuse the request instead.
+    #
+    # Tested on the PROFILES, not on the input list's length: `baseline_records=[{}, {}]` is a
+    # non-empty list that profiles to no fields at all, and a length check would wave it through.
+    if not baseline_profiles:
+        raise HTTPException(422, detail={
+            "detail": "baseline is empty - no fields to compare against, so no verdict is possible"})
 
     # Infer the baseline row count when the caller omits it, from EITHER shape: len(records) on the
     # raw path, the profiles' own count on the precomputed path. Defaulting to 0 would silently
@@ -153,6 +168,7 @@ def verify(body: schemas.VerifyRequest = Body(...)):
 
     results = run_all_checks(baseline_profiles, body.candidate_records, baseline_count,
                              is_sample=body.is_sample,
+                             population_rows=body.population_rows,
                              reference_prices=body.reference_prices)
     verdict = decide(results)
 
@@ -180,6 +196,11 @@ def verify(body: schemas.VerifyRequest = Body(...)):
             for f in verdict.failures
         ],
         judge_consulted=judge_consulted,
+        # Provenance travels with the verdict, always. A consumer gating on `confirmed` alone
+        # inherits exactly the blindness this product exists to remove - see VerifyResponse.
+        rows_judged=len(body.candidate_records),
+        full_battery=verdict.full_battery,
+        checks_stood_down=list(verdict.checks_stood_down),
     )
 
 
