@@ -11,6 +11,7 @@ a broken variant, redeploy, then heal: every verdict after that is earned end to
     python generate.py                 # clean baseline -> index.html
     python generate.py --variant swap  # price and shipping trade places
     python generate.py --list          # every variant and the check it should trip
+    python generate.py --adversarial   # p1/p2/p3.html - the DOM-structure probes (see ADVERSARIAL)
 
 The numbers are chosen, not random. Three things the real Newegg page cannot give us:
 
@@ -29,6 +30,7 @@ from __future__ import annotations
 
 import argparse
 import random
+import re
 import statistics
 from datetime import datetime, timezone
 from pathlib import Path
@@ -96,6 +98,71 @@ VARIANTS: dict[str, str] = {
 # dated record of what came before, which is what makes this a scraping problem and not a maths one.
 FAKE_SALE_DISCOUNT = 0.30   # the visible price really does drop 30%
 FAKE_SALE_INFLATION = 1.60  # but the "was" price is 1.6x what was ever actually charged
+
+
+# --------------------------------------------------------------------------------------
+# Adversarial variants - these vary the PAGE, not the values
+# --------------------------------------------------------------------------------------
+#
+# Everything above corrupts the data a tile carries and leaves the markup alone. That tests the
+# GUARDIAN: we already know exactly what went wrong and we are asking whether the checks say so. It
+# tests the HEALER not at all, because the healer was never given a structural decision to make.
+#
+# These three vary the DOM instead. Each one is a hypothesis about HOW Bright Data's AI picks a
+# selector, arranged so that a wrong pick shows up in the extracted rows - we cannot read the
+# selector it emits, so the page has to make the difference measurable in values. Each ships as its
+# own file because a heal is a 5-10 minute AI job: three collectors probed in parallel is an hour,
+# three probed serially through one URL is most of a day.
+#
+# None of them is a fair-play trap. For every one, a selector that is correct on all thirty tiles
+# EXISTS and is the one the collector description already asks for. If the healer gets it wrong, the
+# page answered the question and the healer did not.
+
+ADVERSARIAL: dict[str, str] = {
+    "first_tile_anomaly": "P1 -> p1.html  tile 1 is simpler than tiles 2-30, and the page is swapped",
+    "label_stripped":     "P2 -> p2.html  price and shipping share one class and carry no label",
+    "renamed_dom_before": "P3 -> p3.html  the clean layout - build the collector against this first",
+    "renamed_dom_after":  "P3 -> p3.html  the same page, every class renamed; redeploy over the above",
+}
+
+# What --adversarial writes, and under which name. p3.html gets the BEFORE form because P3's whole
+# protocol is "collector first, rename second" - the after form is a redeploy over the same URL, not
+# a fourth page, or the healer would be reading a URL it had never been trained on.
+ADVERSARIAL_FILES: dict[str, str] = {
+    "p1.html": "first_tile_anomaly",
+    "p2.html": "label_stripped",
+    "p3.html": "renamed_dom_before",
+}
+
+ALL_VARIANTS: dict[str, str] = {**VARIANTS, **ADVERSARIAL}
+
+# P3's rename map: old class -> new class, covering every hook the clean page has.
+#
+# The two name sets are DISJOINT on purpose. That turns "did the healer quote a stale selector" from
+# a judgement call into set membership - if the word `price-current` appears anywhere in the heal's
+# output, it can only have come from a DOM the healer was holding rather than one it fetched.
+#
+# The new names also change naming CONVENTION, not just vocabulary. If they were `product` and
+# `product-price`, a healer that had merely guessed from the visible text would land on them by
+# accident and we would mistake a lucky guess for a cache hit.
+RENAME: dict[str, str] = {
+    "grid":          "card-deck",
+    "item":          "prod-card",
+    "item-title":    "prod-card__name",
+    "item-rating":   "prod-card__stars",
+    "rating":        "stars-value",
+    "item-price":    "prod-card__cost",
+    "price-current": "cost-now",
+    "price-was":     "cost-before",
+    "price-ship":    "cost-delivery",
+    "item-stock":    "prod-card__avail",
+    "stock":         "avail-badge",
+    "in":            "yes",
+    "out":           "no",
+    "brand":         "sitemark",
+    "tagline":       "sitemark-sub",
+    "count":         "result-total",
+}
 
 
 def apply_variant(rows: list[dict], variant: str) -> list[dict]:
@@ -177,12 +244,41 @@ def apply_variant(rows: list[dict], variant: str) -> list[dict]:
     raise ValueError(f"unknown variant {variant!r}; choose from {', '.join(VARIANTS)}")
 
 
+def rows_for(variant: str) -> list[dict]:
+    """The rows any variant renders from - the one entry point callers should use.
+
+    The adversarial pages mostly break in the MARKUP, so their rows are the clean rows and the
+    damage happens in the card renderer. P1 is the exception: its anomaly is partly a data fact
+    (tile 1 has no reference price and no delivery charge), and a tile renders what its row says,
+    exactly as `_card` already decides whether to emit a crossed-out price.
+    """
+    if variant not in ADVERSARIAL:
+        return apply_variant(base_rows(), variant)
+
+    rows = base_rows()
+    if variant == "first_tile_anomaly":
+        # Tile 1 must be the ONLY structurally simple tile, or "the healer fitted the outlier" has
+        # more than one outlier to mean. Six clean rows happen to carry no original_price, so they
+        # are given one - a 10% markup, inside the 5-30% band the rest of the page already uses, so
+        # the field's distribution is not disturbed enough to be its own finding.
+        for r in rows[1:]:
+            if r["original_price"] is None:
+                r["original_price"] = round(r["price"] * 1.10, 2)
+        rows[0] = {**rows[0], "original_price": None, "shipping": None}
+    return rows
+
+
 # --------------------------------------------------------------------------------------
 # Rendering
 # --------------------------------------------------------------------------------------
 
 def _money(v: float | None) -> str:
     return "" if v is None else f"${v:,.2f}"
+
+
+def _stock_badge(r: dict) -> str:
+    return ('<span class="stock in">In Stock</span>' if r["in_stock"]
+            else '<span class="stock out">Out of Stock</span>')
 
 
 def _card(r: dict, drop_shipping: bool) -> str:
@@ -196,8 +292,7 @@ def _card(r: dict, drop_shipping: bool) -> str:
            if r["original_price"] is not None else "")
     ship = "" if drop_shipping else (
         f'<div class="price-ship">{_money(r["shipping"])} Shipping</div>')
-    stock = ('<span class="stock in">In Stock</span>' if r["in_stock"]
-             else '<span class="stock out">Out of Stock</span>')
+    stock = _stock_badge(r)
     price = _money(r["price"]) or "&mdash;"
 
     return f"""      <li class="item">
@@ -210,6 +305,127 @@ def _card(r: dict, drop_shipping: bool) -> str:
         {ship}
         <div class="item-stock">{stock}</div>
       </li>"""
+
+
+def _card_p1(r: dict) -> str:
+    """P1 - the first-tile anomaly. One tile shaped differently from the twenty-nine behind it.
+
+    THE BREAK, on every tile that has a delivery line: the price and the delivery charge have traded
+    places in the markup. The word "Shipping" travelled with the delivery amount; the CSS classes
+    did not. So `.price-current` now reads "$19.99 Shipping" in 21px bold and the small green
+    `.price-ship` line holds the real price. A collector built on the clean page therefore returns
+    price=19.99 and shipping=1149.99 - a textbook COLUMN_SWAP, and a heal is plainly warranted.
+
+    THE ANOMALY, on tile 1 only: no crossed-out reference price and no delivery line at all, so tile
+    1 had nothing to trade places WITH. Its `.price-current` still holds the real price.
+
+    That single difference is the entire measurement, because it splits the two anchors a healer can
+    reach for - both of which fit tile 1 perfectly:
+
+        positional   .item-price > span:first-child      tile 1   -> $1,999.99   CORRECT
+                     (or "the money after the rating")   tiles 2-30 -> $19.99    WRONG (shipping)
+
+        semantic     the money node that is neither      tile 1   -> $1,999.99   CORRECT
+                     struck through nor labelled         tiles 2-30 -> $1,149.99 CORRECT
+                     "Shipping"
+
+    Bright Data's approval gate previews ONE row, and that row is tile 1. A positional heal previews
+    clean, gets approved, and is wrong on 29 of the 30 rows the moment it runs for real.
+
+    The sharpest form of it: the positional heal reproduces the INCUMBENT selector's output exactly.
+    The "repair" would change nothing at all and still look like a fix, because the only row anyone
+    is shown is the one row the incumbent already gets right.
+    """
+    was = (f'<span class="price-was">{_money(r["original_price"])}</span>'
+           if r["original_price"] is not None else "")
+
+    if r["shipping"] is None:
+        # Tile 1. Nothing to swap with, so the price stays where it belongs - which is exactly what
+        # makes fitting to this tile so attractive and so wrong.
+        lead, ship = _money(r["price"]), ""
+    else:
+        lead = f'{_money(r["shipping"])} Shipping'
+        ship = f'<div class="price-ship">{_money(r["price"])}</div>'
+
+    return f"""      <li class="item">
+        <a class="item-title" href="/p/{r['slug']}">{r['name']}</a>
+        <div class="item-rating"><span class="rating">{r['rating']:.1f}</span> out of 5</div>
+        <div class="item-price">
+          <span class="price-current">{lead}</span>
+          {was}
+        </div>
+        {ship}
+        <div class="item-stock">{_stock_badge(r)}</div>
+      </li>"""
+
+
+def _card_p2(r: dict) -> str:
+    """P2 - the labels stripped. price and shipping in byte-identical markup, adjacent, unlabelled.
+
+    Two `<span class="money">` siblings: same class, same $NN.NN formatting, same rule in the
+    stylesheet, no "Shipping" text, nothing between them but whitespace. Delete the digits and the
+    two nodes are the same string. The delivery charge is FIRST, which is the point - the clean page
+    taught a collector that the first money in a tile is the price, and here that habit is wrong.
+
+    Exactly two things can still tell them apart:
+
+        order       shipping, then price            -> a positional selector reads the shipping
+        magnitude   ~$15 against ~$570, 40x apart   -> a value-aware selector reads the price
+
+    So this is the floor. There is no label to reward a semantic healer and no structure to reward a
+    careful one; whatever it emits came from position or from magnitude, and the extracted rows say
+    which. That also makes P2 the control for P1: if the healer turns out to be positional here,
+    where nothing else is on offer, "it fitted tile 1" stops being a guess about P1.
+
+    The crossed-out reference price keeps its own class and sits after the pair. A page on which
+    NOTHING is distinguishable is not a test, it is a coin toss, and the point is to leave the right
+    answer reachable while removing the easy route to it.
+    """
+    was = (f'<span class="price-was">{_money(r["original_price"])}</span>'
+           if r["original_price"] is not None else "")
+
+    return f"""      <li class="item">
+        <a class="item-title" href="/p/{r['slug']}">{r['name']}</a>
+        <div class="item-rating"><span class="rating">{r['rating']:.1f}</span> out of 5</div>
+        <div class="item-price">
+          <span class="money">{_money(r["shipping"])}</span>
+          <span class="money">{_money(r["price"])}</span>
+          {was}
+        </div>
+        <div class="item-stock">{_stock_badge(r)}</div>
+      </li>"""
+
+
+# P3 is rendered by taking the finished clean document and renaming its hooks, rather than by a card
+# renderer of its own. That is not laziness - it is the only way to be sure the before and after
+# pages differ by class names and by NOTHING else, which is the single claim P3 has to be able to
+# make. A hand-written second renderer would drift, and the first stray whitespace difference would
+# give a failed heal an innocent explanation.
+
+_CSS_CLASS = re.compile(r"\.(" + "|".join(sorted(RENAME, key=len, reverse=True)) + r")(?![\w-])")
+_CLASS_ATTR = re.compile(r'class="([^"]*)"')
+
+
+def _rename_css(style: str) -> str:
+    """Rename class SELECTORS in the stylesheet, and only those.
+
+    Anchored on the leading dot because the map's tokens are ordinary CSS words too: `.grid` is a
+    hook, `display: grid` is a value, and a blanket substitution would rewrite the layout.
+    """
+    return _CSS_CLASS.sub(lambda m: "." + RENAME[m.group(1)], style)
+
+
+def _rename_class_attrs(html: str) -> str:
+    """Rename every token inside every class="" attribute, and touch nothing else.
+
+    Deliberately narrow for the same reason. A document-wide token swap would also rewrite the
+    prose - "out of 5" contains the `out` of `stock out` - and then before and after would differ by
+    more than class names, which is precisely the thing P3 must be able to rule out.
+    """
+    def swap(m: re.Match) -> str:
+        return 'class="' + " ".join(RENAME.get(t, t) for t in m.group(1).split()) + '"'
+
+    return _CLASS_ATTR.sub(swap, html)
 
 
 STYLE = """    :root { color-scheme: dark; }
@@ -258,14 +474,25 @@ STYLE = """    :root { color-scheme: dark; }
       color: #6a6f7e; font-size: 12px; }
     code { color: #a08cff; font-family: ui-monospace, "JetBrains Mono", monospace; }"""
 
+# P2 only. price and shipping share one class, so they must share one rule: any visual difference
+# here - weight, size, colour - hands back the label the variant exists to remove.
+STYLE_MONEY = """    .money { font-size: 18px; font-weight: 600; letter-spacing: -0.01em;
+      font-variant-numeric: tabular-nums; }"""
+
 
 def render(rows: list[dict], variant: str) -> str:
-    drop_shipping = variant == "missing"
-    cards = "\n".join(_card(r, drop_shipping) for r in rows)
-    stamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
-    note = VARIANTS[variant]
+    if variant == "first_tile_anomaly":
+        cards, style = "\n".join(_card_p1(r) for r in rows), STYLE
+    elif variant == "label_stripped":
+        cards, style = "\n".join(_card_p2(r) for r in rows), STYLE + "\n" + STYLE_MONEY
+    else:
+        cards = "\n".join(_card(r, variant == "missing") for r in rows)
+        style = _rename_css(STYLE) if variant == "renamed_dom_after" else STYLE
 
-    return f"""<!DOCTYPE html>
+    stamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+    note = ALL_VARIANTS[variant]
+
+    html = f"""<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="utf-8">
@@ -279,7 +506,7 @@ def render(rows: list[dict], variant: str) -> str:
   <meta name="robots" content="noindex, nofollow">
   <meta name="generator" content="vouch-testbed">
   <style>
-{STYLE}
+{style}
   </style>
 </head>
 <body>
@@ -305,6 +532,13 @@ def render(rows: list[dict], variant: str) -> str:
 </html>
 """
 
+    if variant == "renamed_dom_after":
+        # Renamed last, over the finished document, so the page furniture - the brand, the result
+        # count, the grid - moves with the tiles. A rename that stopped at the product cards would
+        # leave a healer a surviving hook to navigate from, and P3 would be measuring the wrong thing.
+        html = _rename_class_attrs(html)
+    return html
+
 
 def _slug(name: str) -> str:
     keep = [c.lower() if c.isalnum() else "-" for c in name]
@@ -325,25 +559,48 @@ def base_rows() -> list[dict]:
 def main(argv: list[str] | None = None) -> None:
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--variant", default="clean", choices=sorted(VARIANTS))
+    ap.add_argument("--variant", default="clean", choices=sorted(ALL_VARIANTS))
     ap.add_argument("--out", default=str(OUT), help="where to write the HTML")
     ap.add_argument("--list", action="store_true", help="list the variants and exit")
+    ap.add_argument("--adversarial", action="store_true",
+                    help="write p1.html, p2.html and p3.html - the DOM-structure probes; --out is "
+                         "ignored because all three are deployed side by side")
     args = ap.parse_args(argv)
 
     if args.list:
-        width = max(len(v) for v in VARIANTS)
+        width = max(len(v) for v in ALL_VARIANTS)
+        print("data variants - the values are corrupted, the markup is not:")
         for name, desc in VARIANTS.items():
+            print(f"  {name:{width}}  {desc}")
+        print("\nadversarial variants - the markup is varied, to probe the healer:")
+        for name, desc in ADVERSARIAL.items():
             print(f"  {name:{width}}  {desc}")
         return
 
-    rows = apply_variant(base_rows(), args.variant)
+    if args.adversarial:
+        for filename, variant in ADVERSARIAL_FILES.items():
+            path = HERE / filename
+            html = render(rows_for(variant), variant)
+            path.write_text(html, encoding="utf-8")
+            print(f"wrote {path}  ({len(html):,} bytes)")
+            print(f"  {variant} - {ADVERSARIAL[variant]}")
+        print()
+        print("Deploy all three at once and give each its own collector - a heal is a 5-10 minute")
+        print("AI job, so probing them through one URL costs a day instead of an hour.")
+        print()
+        print("P3 is the two-step: build its collector against p3.html as written, THEN")
+        print("  python generate.py --variant renamed_dom_after --out p3.html")
+        print("and redeploy. The rename has to land on a URL the collector already knows.")
+        return
+
+    rows = rows_for(args.variant)
     html = render(rows, args.variant)
     path = Path(args.out)
     path.write_text(html, encoding="utf-8")
 
     priced = [r["price"] for r in rows if r["price"] is not None]
     print(f"wrote {path}  ({len(html):,} bytes)")
-    print(f"  variant : {args.variant} - {VARIANTS[args.variant]}")
+    print(f"  variant : {args.variant} - {ALL_VARIANTS[args.variant]}")
     print(f"  products: {len(rows)}, {len(priced)} with a price")
     if priced:
         # statistics.median, matching what the guardian's profiler computes - picking the upper of

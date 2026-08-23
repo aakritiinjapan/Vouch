@@ -1,0 +1,242 @@
+{
+  "collector_id": "c_mt5gye8j2jjqinpxz9",
+  "url": "https://vouch-voltmart.netlify.app/p2.html",
+  "name": "vouch-research-p2",
+  "description": "Extract every product tile on this graphics-card listing page. For each tile: name (the product title link), price (the large current price), original_price (the smaller crossed-out price, null when absent), shipping (the dollar amount on the Shipping line), rating (the number before \"out of 5\"), in_stock (true when the badge reads In Stock, false when Out of Stock).",
+  "rows": [
+    {
+      "name": "Voltmart RTX 5090 Founders Edition 32GB GDDR7",
+      "price": 1999.99,
+      "original_price": 2199.99,
+      "shipping": 24.99,
+      "rating": 4.8,
+      "in_stock": true
+    },
+    {
+      "name": "Voltmart RTX 5080 Stormbringer 16GB GDDR7",
+      "price": 1149.99,
+      "original_price": 1279.99,
+      "shipping": 19.99,
+      "rating": 4.6,
+      "in_stock": true
+    },
+    {
+      "name": "Voltmart RTX 5070 Ti Aero 16GB GDDR7",
+      "price": 849.99,
+      "original_price": 899.99,
+      "shipping": 14.99,
+      "rating": 4.5,
+      "in_stock": true
+    },
+    {
+      "name": "Voltmart RTX 5070 Pulse 12GB GDDR7",
+      "price": 629.99,
+      "original_price": 689.99,
+      "shipping": 14.99,
+      "rating": 4.3,
+      "in_stock": true
+    },
+    {
+      "name": "Voltmart RTX 5060 Ti Windforce 16GB",
+      "price": 449.99,
+      "original_price": 479.99,
+      "shipping": 9.99,
+      "rating": 4.2,
+      "in_stock": true
+    },
+    {
+      "name": "Voltmart RTX 5060 Eagle 8GB",
+      "price": 329.99,
+      "shipping": 9.99,
+      "rating": 4,
+      "in_stock": true
+    },
+    {
+      "name": "Voltmart RX 9070 XT Nitro+ 16GB",
+      "price": 749.99,
+      "original_price": 819.99,
+      "shipping": 16.99,
+      "rating": 4.4,
+      "in_stock": true
+    },
+    {
+      "name": "Voltmart RX 9070 Hellhound 16GB",
+      "price": 659.99,
+      "original_price": 699.99,
+      "shipping": 16.99,
+      "rating": 4.1,
+      "in_stock": true
+    },
+    {
+      "name": "Voltmart RX 9060 XT Pulse 16GB",
+      "price": 389.99,
+      "original_price": 429.99,
+      "shipping": 12.49,
+      "rating": 3.9,
+      "in_stock": true
+    },
+    {
+      "name": "Voltmart RX 9060 Challenger 8GB",
+      "price": 279.99,
+      "shipping": 12.49,
+      "rating": 3.7,
+      "in_stock": false
+    },
+    {
+      "name": "Voltmart Arc B770 Limited 16GB",
+      "price": 369.99,
+      "original_price": 399.99,
+      "shipping": 11.99,
+      "rating": 3.8,
+      "in_stock": true
+    },
+    {
+      "name": "Voltmart Arc B750 Challenger 12GB",
+      "price": 249.99,
+      "shipping": 11.99,
+      "rating": 3.6,
+      "in_stock": true
+    },
+    {
+      "name": "Voltmart RTX 5090 Titan Liquid 32GB",
+      "price": 2449.99,
+      "original_price": 2599.99,
+      "shipping": 24.99,
+      "rating": 4.9,
+      "in_stock": false
+    },
+    {
+      "name": "Voltmart RTX 5080 Suprim Liquid X 16GB",
+      "price": 1349.99,
+      "original_price": 1449.99,
+      "shipping": 22.99,
+      "rating": 4.7,
+      "in_stock": true
+    },
+    {
+      "name": "Voltmart RTX 5070 Ti Gaming Trio 16GB",
+      "price": 899.99,
+      "original_price": 949.99,
+      "shipping": 14.99,
+      "rating": 4.4,
+      "in_stock": true
+    },
+    {
+      "name": "Voltmart RTX 4090 Gaming OC 24GB",
+      "price": 1799.99,
+      "original_price": 1949.99,
+      "shipping": 21.99,
+      "rating": 4.8,
+      "in_stock": false
+    },
+    {
+      "name": "Voltmart RTX 4080 Super Ventus 16GB",
+      "price": 999.99,
+      "original_price": 1099.99,
+      "shipping": 18.49,
+      "rating": 4.5,
+      "in_stock": true
+    },
+    {
+      "name": "Voltmart RTX 4070 Ti Super Dual 16GB",
+      "price": 719.99,
+      "original_price": 779.99,
+      "shipping": 15.49,
+      "rating": 4.3,
+      "in_stock": true
+    },
+    {
+      "name": "Voltmart RTX 4060 Ti Low Profile 8GB",
+      "price": 379.99,
+      "original_price": 409.99,
+      "shipping": 8.99,
+      "rating": 4,
+      "in_stock": true
+    },
+    {
+      "name": "Voltmart RX 7900 XTX Taichi 24GB",
+      "price": 929.99,
+      "original_price": 999.99,
+      "shipping": 19.49,
+      "rating": 4.6,
+      "in_stock": true
+    },
+    {
+      "name": "Voltmart RX 7900 GRE Steel Legend 16GB",
+      "price": 549.99,
+      "original_price": 589.99,
+      "shipping": 15.99,
+      "rating": 4.2,
+      "in_stock": true
+    },
+    {
+      "name": "Voltmart RX 7800 XT Phantom 16GB",
+      "price": 489.99,
+      "shipping": 13.99,
+      "rating": 4.1,
+      "in_stock": true
+    },
+    {
+      "name": "Voltmart RX 7700 XT Fighter 12GB",
+      "price": 409.99,
+      "original_price": 439.99,
+      "shipping": 13.99,
+      "rating": 3.9,
+      "in_stock": false
+    },
+    {
+      "name": "Voltmart RX 7600 XT Swift 16GB",
+      "price": 309.99,
+      "original_price": 329.99,
+      "shipping": 10.99,
+      "rating": 3.8,
+      "in_stock": true
+    },
+    {
+      "name": "Voltmart GTX 1660 Super Refresh 6GB",
+      "price": 179.99,
+      "shipping": 6.99,
+      "rating": 3.5,
+      "in_stock": true
+    },
+    {
+      "name": "Voltmart Quadro A2000 Workstation 12GB",
+      "price": 649.99,
+      "original_price": 699.99,
+      "shipping": 17.99,
+      "rating": 4.4,
+      "in_stock": true
+    },
+    {
+      "name": "Voltmart Radeon Pro W7600 8GB",
+      "price": 579.99,
+      "original_price": 619.99,
+      "shipping": 16.49,
+      "rating": 4.2,
+      "in_stock": true
+    },
+    {
+      "name": "Voltmart Arc A770 Predator 16GB",
+      "price": 289.99,
+      "original_price": 319.99,
+      "shipping": 10.49,
+      "rating": 3.7,
+      "in_stock": true
+    },
+    {
+      "name": "Voltmart RTX 5050 Verto Dual 8GB",
+      "price": 249.99,
+      "original_price": 269.99,
+      "shipping": 7.99,
+      "rating": 3.6,
+      "in_stock": true
+    },
+    {
+      "name": "Voltmart GT 1030 Silent Passive 2GB",
+      "price": 89.99,
+      "shipping": 4.99,
+      "rating": 3.2,
+      "in_stock": true
+    }
+  ]
+}

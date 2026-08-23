@@ -28,3 +28,6 @@ scratchpad/
 
 # derived preview output (rebuild with testbed/preview.py)
 vouch/testbed/preview/
+
+# Local Netlify folder
+.netlify
