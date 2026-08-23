@@ -24,7 +24,7 @@ curl -sf "http://localhost:${PORT}/health" >/dev/null 2>&1 \
 echo "==> seeding demo held proposals"
 curl -sf -X POST "http://localhost:${PORT}/cycles/run" \
   -H "Content-Type: application/json" \
-  -d '{"simulate_run": "run_degraded", "simulate_heal": "healed_swapped"}' \
+  -d '{"simulate_run": "run_degraded", "simulate_heal": "healed_swapped", "max_attempts": 1}' \
   >/dev/null 2>&1 && echo "==> demo cycle done" || echo "==> demo cycle failed (non-fatal)"
 
 echo "==> ready"
