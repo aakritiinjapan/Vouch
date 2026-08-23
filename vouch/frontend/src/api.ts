@@ -13,7 +13,7 @@ import type {
   VerifyResponse,
 } from "./types";
 
-const BASE = "/api";
+const BASE = (import.meta.env.VITE_API_BASE as string | undefined) ?? "/api";
 
 export class ApiError extends Error {
   status: number;

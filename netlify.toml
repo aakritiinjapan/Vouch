@@ -1,0 +1,13 @@
+[build]
+  base    = "vouch/frontend"
+  command = "npm run build"
+  publish = "dist"
+
+[build.environment]
+  NODE_VERSION = "20"
+
+# All unmatched routes go to index.html — required for a hash-router SPA.
+[[redirects]]
+  from   = "/*"
+  to     = "/index.html"
+  status = 200
