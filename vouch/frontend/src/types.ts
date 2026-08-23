@@ -209,6 +209,8 @@ export interface VerifyRequest {
   baseline_count?: number;
   is_sample?: boolean;
   use_judge?: boolean;
+  /** product name → the price confirmed before the current sale; only for a sale-claim audit */
+  reference_prices?: Record<string, number>;
 }
 
 export interface VerifyFailure {

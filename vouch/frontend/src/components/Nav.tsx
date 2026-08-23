@@ -33,7 +33,7 @@ export function Nav({
           className="flex items-center gap-2"
           aria-label="Vouch home"
         >
-          <Wordmark />
+          <Wordmark tagline />
         </button>
 
         <nav className="flex items-center gap-1" aria-label="Primary">
@@ -59,6 +59,11 @@ export function Nav({
 
         <div className="ml-auto flex min-w-0 items-center gap-2.5 text-sm text-ink-secondary">
           {demo && <DemoMenu {...demo} />}
+          {/* Attribution, not decoration: every verdict here is judged on rows a Scraper Studio
+              collector returned, and the heal loop being validated is Bright Data's own. */}
+          <span className="hidden rounded-full border border-hair bg-surface px-3 py-1.5 text-[11.5px] text-ink-muted lg:inline">
+            Powered by Bright Data Scraper Studio
+          </span>
           <span className="grid size-6 shrink-0 place-items-center rounded-md bg-aurora text-xs font-bold text-canvas">
             V
           </span>

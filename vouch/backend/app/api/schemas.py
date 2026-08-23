@@ -381,6 +381,10 @@ class VerifyRequest(BaseModel):
     baseline_count: Optional[int] = None                   # inferred from the baseline when omitted
     is_sample: bool = False                                 # candidate is a preview - suppress volume
     use_judge: bool = False                                 # allow Tier 3 (no-op in mock / no key)
+    # product name -> the price confirmed BEFORE the current sale. Supply only when auditing a sale
+    # claim; omitted, check_reference_price stands down. This is the one input that lets a caller ask
+    # a question about the past rather than about our extraction.
+    reference_prices: Optional[dict[str, float]] = None
 
 
 class VerifyFailure(BaseModel):

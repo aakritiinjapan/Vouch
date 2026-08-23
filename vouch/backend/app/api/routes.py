@@ -117,6 +117,9 @@ def verify(body: schemas.VerifyRequest = Body(...)):
     if body.baseline_records is not None and len(body.baseline_records) > MAX_VERIFY_ROWS:
         raise HTTPException(422, detail={
             "detail": f"baseline_records exceeds the {MAX_VERIFY_ROWS}-row limit"})
+    if body.reference_prices is not None and len(body.reference_prices) > MAX_VERIFY_ROWS:
+        raise HTTPException(422, detail={
+            "detail": f"reference_prices exceeds the {MAX_VERIFY_ROWS}-entry limit"})
 
     has_records = body.baseline_records is not None
     has_profiles = body.baseline_profiles is not None
@@ -149,7 +152,8 @@ def verify(body: schemas.VerifyRequest = Body(...)):
         baseline_count = max((p.count for p in baseline_profiles.values()), default=0)
 
     results = run_all_checks(baseline_profiles, body.candidate_records, baseline_count,
-                             is_sample=body.is_sample)
+                             is_sample=body.is_sample,
+                             reference_prices=body.reference_prices)
     verdict = decide(results)
 
     judge_consulted = False

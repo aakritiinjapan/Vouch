@@ -44,7 +44,7 @@ describe("routing", () => {
 
     // Into the console
     await userEvent.click(screen.getAllByRole("button", { name: /launch console/i })[0]);
-    expect((await screen.findAllByText(/needs your decision|pricing desk/i)).length).toBeGreaterThan(0);
+    expect((await screen.findAllByText(/decisions needing review/i)).length).toBeGreaterThan(0);
 
     // Over to the Trust API
     await userEvent.click(screen.getByRole("button", { name: /^trust api$/i }));
@@ -52,7 +52,7 @@ describe("routing", () => {
 
     // Back to the console
     await userEvent.click(screen.getByRole("button", { name: /^console$/i }));
-    expect((await screen.findAllByText(/pricing desk|needs your decision/i)).length).toBeGreaterThan(0);
+    expect((await screen.findAllByText(/decisions needing review/i)).length).toBeGreaterThan(0);
   });
 
   it("scopes the Demo control to the Console route only", async () => {
