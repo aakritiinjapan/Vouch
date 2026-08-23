@@ -17,9 +17,9 @@ Two conventions the whole API follows:
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Optional
+from typing import Any, Literal, Optional
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 from sqlmodel import Session, select
 
 from app import service
@@ -202,9 +202,14 @@ def build_proposal(session: Session, proposal: RepriceProposal) -> ProposalOut:
         margin_pct_after=margin_pct(proposal.proposed_price, product.cost) if product else None,
         is_safe=safe,
         safe_reason=why,
-        product=ProductRef(id=product.id, sku=product.sku, name=product.name),
+        # Every other read of `product` here is guarded and this one was not, so an orphaned proposal
+        # took the whole of GET /proposals down with an AttributeError rather than rendering as one
+        # unresolvable card. SQLite does not enforce the foreign key (see db.py), so "cannot happen"
+        # was never true - and a 500 on the queue is a worse failure than a row that says so plainly.
+        product=(ProductRef(id=product.id, sku=product.sku, name=product.name) if product
+                 else ProductRef(id=proposal.product_id, sku="?", name="(product not found)")),
         source=SourceOut(
-            url=product.competitor_url,
+            url=product.competitor_url if product else "",
             confirmed=bool(observation.confirmed) if observation else False,
             observed_price=observation.observed_price if observation else None,
             last_confirmed_at=latest_confirmed.created_at if latest_confirmed else None,
@@ -324,8 +329,17 @@ class ApproveResponse(BaseModel):
 
 
 class BulkApproveRequest(BaseModel):
-    min_confidence: int = service.CONFIDENCE_SAFE_FLOOR
-    max_delta_pct: float = service.SAFE_DELTA_PCT
+    """The safe band for "Approve all safe changes", and the bounds it has to hold.
+
+    These two numbers ARE the rails on the only endpoint that moves several prices at once, so an
+    unbounded value is not a tuning knob, it is an off switch. `max_delta_pct` is a FRACTION - 0.15 is
+    15% - and the name openly invites a caller to send 15. Unbounded, that reads as a 1500% band and,
+    paired with min_confidence 0, silently approves every pending proposal including the ones the
+    guardian scored in single digits. A 422 is the honest answer to that request; approving forty
+    percent of a catalogue's margin away is not.
+    """
+    min_confidence: int = Field(default=service.CONFIDENCE_SAFE_FLOOR, ge=0, le=100)
+    max_delta_pct: float = Field(default=service.SAFE_DELTA_PCT, ge=0.0, le=1.0)
 
 
 class BulkApproveResponse(BaseModel):
@@ -358,6 +372,40 @@ class HistoryOut(BaseModel):
 # trust layer - the stateless /verify surface
 # --------------------------------------------------------------------------------------
 
+class BaselineProfileIn(BaseModel):
+    """One field's statistical fingerprint, as a caller supplies it on the `baseline_profiles` path.
+
+    Mirrors guardian.checks.FieldProfile field for field, but as a validated model rather than a bare
+    dict, for two reasons.
+
+    It closes a 500. FieldProfile is a plain dataclass, so `FieldProfile(**d)` accepts any value for
+    any key: `{"count": "lots"}` was constructed happily and only blew up later, inside a check, as an
+    unhandled TypeError on a public unauthenticated endpoint. The route's existing guard catches a
+    profile with the wrong KEYS; nothing caught one with the right keys and nonsense VALUES.
+
+    And it publishes the shape. This is the half of the contract a third party cannot guess - the
+    other half is raw rows - so it belongs in the OpenAPI schema rather than in our source.
+    """
+    model_config = ConfigDict(extra="forbid")
+
+    name: str
+    dtype: Literal["numeric", "string", "bool", "unknown"]
+    count: int = Field(ge=0)
+    null_rate: float = Field(ge=0.0, le=1.0)
+    # numeric
+    median: Optional[float] = None
+    q1: Optional[float] = None
+    q3: Optional[float] = None
+    minimum: Optional[float] = None
+    maximum: Optional[float] = None
+    # bool
+    true_rate: Optional[float] = Field(default=None, ge=0.0, le=1.0)
+    # string
+    mean_len: Optional[float] = Field(default=None, ge=0.0)
+    cardinality: Optional[int] = Field(default=None, ge=0)
+    sample: list[Any] = Field(default_factory=list)
+
+
 class VerifyRequest(BaseModel):
     """A caller hands us the rows to judge and a reference to judge them against.
 
@@ -377,9 +425,18 @@ class VerifyRequest(BaseModel):
 
     candidate_records: list[dict]                          # REQUIRED, non-empty - the rows to judge
     baseline_records: Optional[list[dict]] = None          # raw reference rows, profiled here
-    baseline_profiles: Optional[dict[str, dict]] = None    # precomputed serialized FieldProfiles
-    baseline_count: Optional[int] = None                   # inferred from the baseline when omitted
+    # precomputed serialized FieldProfiles. Typed, not `dict[str, dict]`: see BaselineProfileIn.
+    baseline_profiles: Optional[dict[str, BaselineProfileIn]] = None
+    # inferred from the baseline when omitted; never negative, which would flip check_record_count's
+    # ratio and quietly stop ROW_COUNT_SHIFT from meaning anything
+    baseline_count: Optional[int] = Field(default=None, ge=0)
     is_sample: bool = False                                 # candidate is a preview - suppress volume
+    # How many rows the candidate would have over the WHOLE page, when the caller knows it. This is
+    # the difference between "2 rows" and "2 of 30", and it changes the verdict in both directions:
+    # it re-enables ROW_COUNT_SHIFT for previews, and it makes a preview that turns out to BE the
+    # whole page count as full evidence rather than being held for no reason. Bright Data states it
+    # as a sentinel string in the gate payload ("28 more items"); scraper.brightdata parses it out.
+    population_rows: Optional[int] = Field(default=None, ge=0)
     use_judge: bool = False                                 # allow Tier 3 (no-op in mock / no key)
     # product name -> the price confirmed BEFORE the current sale. Supply only when auditing a sale
     # claim; omitted, check_reference_price stands down. This is the one input that lets a caller ask
@@ -397,12 +454,32 @@ class VerifyFailure(BaseModel):
 
 
 class VerifyResponse(BaseModel):
+    """The verdict, plus how much of the battery actually stood behind it.
+
+    The coverage fields are not decoration. docs/research/FINDINGS.md measured a shipping-in-the-price
+    -field swap scoring PASS 100/100 on Bright Data's 2-row preview and FAIL 40/100 on the same heal
+    over the full 30 rows - because the checks that catch a swap are distributional, and those are the
+    ones a tiny sample switches off. Without `rows_judged` / `full_battery` / `checks_stood_down`,
+    those two answers are byte-identical on the wire, and a caller gating on `confirmed` inherits
+    exactly the blindness Vouch exists to remove.
+
+    Read them as: `confirmed` is our answer; `full_battery` is whether we were in a position to give
+    one. A `confirmed: true` with `full_battery: false` means "nothing we could still run objected" -
+    which is a weaker claim, and the caller is entitled to know which one it got.
+
+    `failures` is every finding, not only blocking ones: a MEDIUM finding costs 10 confidence points
+    and still leaves `decision: pass`. Gate on `decision`/`confidence`, and treat a non-empty
+    `failures` on a pass as advisory rather than as a rejection.
+    """
     decision: str                 # pass | review | fail
     confirmed: bool               # decision == pass
     confidence: int               # 0-100
     brief: str
     failures: list[VerifyFailure]
     judge_consulted: bool
+    rows_judged: int              # how many candidate rows this verdict is actually based on
+    full_battery: bool            # False when any check could not run against this candidate
+    checks_stood_down: list[str]  # the codes that therefore could not have fired
 
 
 # --------------------------------------------------------------------------------------

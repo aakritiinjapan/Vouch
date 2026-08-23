@@ -248,6 +248,123 @@ def test_response_schema_keys(client, runs):
                               baseline_records=runs["baseline"])
     assert status == 200, payload
     assert set(payload) == {"decision", "confirmed", "confidence", "brief", "failures",
-                            "judge_consulted"}
+                            "judge_consulted",
+                            # provenance - see VerifyResponse for why these are not optional
+                            "rows_judged", "full_battery", "checks_stood_down"}
     for failure in payload["failures"]:
         assert set(failure) == {"code", "severity", "field", "message", "evidence"}
+
+
+# --------------------------------------------------------------------------------------
+# an empty baseline is NO baseline - it must never be scored
+# --------------------------------------------------------------------------------------
+
+def test_empty_baseline_records_is_422_not_a_confident_pass(client):
+    """The worst answer this endpoint can give is maximum confidence backed by nothing.
+
+    Every check compares the candidate against a NAMED baseline field, so an empty baseline makes the
+    entire battery stand down: zero checks fire, zero failures come back, and decide() reads that
+    silence as a clean run. The caller is told `confirmed: true, confidence: 100` about rows nothing
+    ever looked at. Refuse the request instead.
+    """
+    status, payload = _verify(client, baseline_records=[],
+                              candidate_records=[{"price": 24.99, "name": "RTX 5090"},
+                                                 {"nothing": "to do with prices"}])
+    assert status == 422, payload
+    assert "confidence" not in payload, "a refused request must not carry a score at all"
+
+
+def test_empty_baseline_profiles_is_422_not_a_confident_pass(client):
+    status, payload = _verify(client, baseline_profiles={},
+                              candidate_records=[{"price": 24.99, "name": "RTX 5090"}])
+    assert status == 422, payload
+
+
+def test_baseline_of_only_empty_rows_is_422(client):
+    """`[{}, {}]` is non-empty as a list and empty as a baseline - profile_run() yields no fields.
+
+    Checking the input list's length rather than the profiles it produced would let this straight
+    through to the same unearned 100.
+    """
+    status, payload = _verify(client, baseline_records=[{}, {}],
+                              candidate_records=[{"price": 24.99}])
+    assert status == 422, payload
+
+
+# --------------------------------------------------------------------------------------
+# caller-supplied profiles are DATA, and must be type-checked like data
+# --------------------------------------------------------------------------------------
+
+@pytest.mark.parametrize("bad_profile", [
+    {"name": "price", "dtype": "numeric", "count": "lots", "null_rate": 0.0},
+    {"name": "price", "dtype": "numeric", "count": 8, "null_rate": "none"},
+    {"name": "price", "dtype": "not-a-dtype", "count": 8, "null_rate": 0.0},
+    {"name": "price", "dtype": "numeric", "count": 8, "null_rate": 0.0, "median": "cheap"},
+    {"name": "price", "dtype": "numeric", "count": -8, "null_rate": 0.0},
+    {"name": "price", "dtype": "numeric", "count": 8, "null_rate": 4.2},
+])
+def test_profile_with_wrong_value_types_is_422_not_500(client, runs, bad_profile):
+    """FieldProfile is a plain dataclass, so FieldProfile(**d) accepts any value for any key.
+
+    The route's try/except only catches a profile with the wrong KEYS; one with the right keys and
+    nonsense VALUES was constructed happily and then raised deep inside a check - an unhandled 500 on
+    a public, unauthenticated endpoint, from a payload a caller could send by typo.
+    """
+    status, payload = _verify(client, candidate_records=runs["baseline"],
+                              baseline_profiles={"price": bad_profile})
+    assert status == 422, f"expected 422, got {status}: {payload}"
+
+
+def test_negative_baseline_count_is_422(client, runs):
+    """A negative count is not a smaller baseline, it is a nonsense one - and it flips
+    check_record_count's ratio sign, so ROW_COUNT_SHIFT stops meaning anything."""
+    status, payload = _verify(client, candidate_records=runs["baseline"],
+                              baseline_records=runs["baseline"], baseline_count=-5)
+    assert status == 422, payload
+
+
+# --------------------------------------------------------------------------------------
+# coverage disclosure - the 2-row gate, reproduced through the public contract
+# --------------------------------------------------------------------------------------
+
+def test_a_pass_on_a_tiny_sample_says_what_could_not_run(client):
+    """docs/research/FINDINGS.md, as an API consumer would meet it.
+
+    Same heal, same guardian, same checks; only the row count differs. On the 2-row preview Bright
+    Data's gate shows, a shipping-in-the-price-field swap scores PASS 100/100 with no findings. On the
+    full 30 rows it is a critical COLUMN_SWAP. If the response cannot tell those two `confirmed: true`
+    answers apart, a third party gating on it inherits the exact blindness we built Vouch to remove.
+    """
+    baseline = [{"name": f"card {i}", "price": 1800 + i * 20, "shipping": 9.99 + (i % 3) * 5}
+                for i in range(30)]
+    gate_sample = [{"name": "card 0", "price": 22.49, "shipping": 22.49},
+                   {"name": "card 1", "price": 22.49, "shipping": 22.49}]
+
+    status, payload = _verify(client, baseline_records=baseline,
+                              candidate_records=gate_sample, is_sample=True)
+    assert status == 200, payload
+
+    # This assertion used to read `== "pass"`, as a precondition documenting the bug. It is now the
+    # assertion that the bug is fixed: no finding fires (the swap is genuinely invisible in two rows),
+    # yet the verdict is held rather than confirmed, because nothing was in a position to object.
+    assert payload["decision"] == "review"
+    assert payload["confirmed"] is False, "a 2-row preview must never confirm"
+    assert payload["failures"] == [], "and it must not invent a finding to justify the hold"
+
+    assert payload["rows_judged"] == 2
+    assert payload["full_battery"] is False, (
+        "a verdict reached with checks disabled must not present as a complete one")
+    stood_down = set(payload["checks_stood_down"])
+    assert {"ROW_COUNT_SHIFT", "CARDINALITY_COLLAPSE", "NUMERIC_DRIFT"} <= stood_down, stood_down
+
+
+def test_a_pass_on_the_full_run_reports_a_full_battery(client, runs):
+    """The other side of the same coin: when nothing stood down, say so, or the disclosure above is
+    just noise a caller learns to ignore."""
+    baseline = runs["baseline"]
+    status, payload = _verify(client, baseline_records=baseline, candidate_records=baseline)
+    assert status == 200, payload
+    assert payload["decision"] == "pass"
+    assert payload["rows_judged"] == len(baseline)
+    assert payload["full_battery"] is True
+    assert payload["checks_stood_down"] == []

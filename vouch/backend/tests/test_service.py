@@ -323,6 +323,114 @@ def test_heal_log_uses_scraper_studio_vocabulary(session, held):
     assert "re-prompted with the guardian's diagnosis (attempt 2)" in second
 
 
+# --------------------------------------------------------------------------------------
+# what a heal event records about the verification, as distinct from about the finding
+# --------------------------------------------------------------------------------------
+
+def test_a_heal_event_records_how_much_was_looked_at(session, product):
+    """Without this the study's two answers write the identical row.
+
+    "PASS on two preview rows" and "PASS on thirty" are the same `verdict` and the same empty
+    evidence dict; the difference lives entirely in the provenance, which is what these keys are.
+    """
+    service.run_cycle(session, product, simulate_run="run_degraded")
+    event = session.exec(select(HealEvent)).one()
+
+    assert event.evidence["full_battery"] is True
+    assert event.evidence["verified_on"] == \
+        "the approval gate returned the whole page — nothing further to run (8 of 8 rows)", \
+        "MOCK_MODE's fixture is a full-size stand-in, so the gate IS the whole page"
+    assert "checks_stood_down" not in event.evidence, "nothing stood down on a full run"
+
+
+def test_everything_in_that_record_survives_the_card_that_renders_it(session, held):
+    """The held card renders this dict generically: numbers go through a currency formatter and
+    objects through String(). A row reading "$30.00" or "[object Object]" is a bug you only find on
+    a projector, so the constraint is asserted here rather than remembered."""
+    events = list(session.exec(select(HealEvent)))
+    for event in events:
+        for key in service.VERIFICATION_KEYS:
+            if key in event.evidence:
+                assert isinstance(event.evidence[key], (str, bool)), key
+
+
+def test_a_rejected_heal_records_the_finding_and_the_provenance_side_by_side(session, held):
+    events = list(session.exec(select(HealEvent).order_by(HealEvent.attempt)))
+    evidence = events[0].evidence
+
+    assert evidence["looks_like"] == "shipping", "the finding's own evidence"
+    assert "8 of 8 rows" in evidence["verified_on"], "and how much of the page said so"
+
+
+def test_the_operator_log_names_the_step_that_verified_the_heal(session, product):
+    service.run_cycle(session, product, simulate_run="run_degraded")
+    event = session.exec(select(HealEvent)).one()
+    text = " | ".join(e["text"] for e in service.heal_log_entries(event))
+
+    assert "verdict taken over the approval gate returned the whole page" in text
+    assert "saved to production" in text, "the log says where the fix went, not just that it went"
+
+
+def test_the_log_reads_the_real_gate_the_way_the_loop_walks_it(session):
+    """The path MOCK_MODE cannot produce: a preview, then a full run, then the draft probe.
+
+    Written against a HealEvent rather than a cycle because the subject is the vocabulary, and the
+    loop that produces these facts has its own tests in test_orchestrator.py.
+    """
+    event = HealEvent(
+        collector_id=COLLECTOR, trigger_reason="'price' is empty on 75% of rows",
+        prompt="fix the price", proposed_confidence=95, verdict=HealVerdict.PASS,
+        risk_brief="Heal verified.", status=HealStatus.APPROVED, attempt=1,
+        evidence={
+            "source_change": "'price' now reads '.price-ship', the element 'shipping' read before",
+            "gate_decision": "review on 2 preview row(s) — a preview can reject, but it can never "
+                             "confirm",
+            "verified_on": "a full run of the healed template, not the gate's preview "
+                           "(30 of 30 rows)",
+            "draft_check": "production re-read after accepting: unchanged — the heal was still "
+                           "only a draft",
+        },
+    )
+    entries = service.heal_log_entries(event)
+    text = " | ".join(e["text"] for e in entries)
+
+    assert "source diff: 'price' now reads '.price-ship'" in text
+    assert "a preview can reject, but it can never confirm" in text
+    assert "verdict taken over a full run of the healed template" in text
+    assert "(30 of 30 rows)" in text
+    assert "production re-read after accepting: unchanged" in text
+    assert [e["kind"] for e in entries] == [
+        "run",       # what triggered it
+        "heal",      # heal proposed - awaiting approval
+        "heal",      # what the healer changed in the collector's source
+        "verdict",   # the pre-filter on the preview, which could only ever have rejected
+        "run",       # the full page the decision was taken over
+        "run",       # production, read back
+        "verdict",   # the one that decided
+        "commit",
+    ]
+
+
+def test_the_log_never_invents_a_kind_the_frontend_cannot_render(session, held):
+    """LogKind is a closed union in frontend/src/types.ts and the receipt draws a glyph per kind, so
+    a sixth value ships as a blank circle. New steps reuse the five."""
+    events = list(session.exec(select(HealEvent)))
+    kinds = {e["kind"] for ev in events for e in service.heal_log_entries(ev)}
+    assert kinds <= {"run", "heal", "verdict", "commit", "reprompt"}
+
+
+def test_a_heal_event_from_before_this_existed_still_renders(session):
+    """An empty evidence dict means we do not know how hard anyone looked. Say nothing, rather than
+    print a reassuring line about a verification that may never have happened."""
+    event = HealEvent(collector_id=COLLECTOR, trigger_reason="", prompt="p",
+                      verdict=HealVerdict.FAIL, risk_brief="Rejected this heal.",
+                      status=HealStatus.REJECTED, attempt=1, evidence={})
+    text = " | ".join(e["text"] for e in service.heal_log_entries(event))
+
+    assert "verified" not in text
+    assert "previous collector retained" in text
+
+
 def test_ensure_baseline_refuses_a_product_with_no_collector(session):
     orphan = Product(sku="X", name="X", my_price=1.0, cost=0.5,
                      competitor_url="https://example.com/x")

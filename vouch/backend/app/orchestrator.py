@@ -2,10 +2,34 @@
 The loop. For each product:
 
     1. run its competitor collector
-    2. if the run looks degraded, heal - but validate the heal with the guardian BEFORE committing
+    2. if the run looks degraded, heal - and let NOTHING reach production until the healed template
+       has been run over the WHOLE page and judged on that run
     3. if the guardian rejects, feed its own diagnosis back as a sharper heal prompt and retry
     4. only trusted competitor prices reach the pricing engine
     5. produce a reprice proposal the seller reviews (or a HELD one if the source is unconfirmed)
+
+Step 2 in full, because it is the step that moves money:
+
+    propose_heal(capture_diff=True)         the gate: preview rows AND the healer's own source diff,
+                                            both inside a job already paid for
+    a cheap pre-filter on the preview       it may REJECT outright; it may never confirm
+    approve_heal(save_to_production=False)  the accepted heal lands in a DRAFT
+    run(..., version="dev")                 the whole page, as the healed template really produces it
+    a probe of production                   proves, for THIS approve, that the draft did not publish
+    the guardian, over those full-page rows full evidence, full battery
+    approve_heal(save_to_production=True)   only now, and only if that verdict confirms
+
+Why it is built this way, measured rather than argued (docs/research/FINDINGS.md). The gate hands
+over the first two tiles of thirty. A heal that had put the delivery charge in the `price` field
+scored PASS 100/100 on those two rows; the same heal over all thirty is COLUMN_SWAP, FAIL 40/100.
+This module used to commit on that preview and then read the competitor's price out of the same two
+rows - two defects compounding, because with 2 of 30 the product being priced may not even be
+present. `decide` now caps partial evidence below PASS, which stops the first defect on its own, and
+this loop deliberately does not lean on it: a cap is a tunable policy in the guardian, and this is
+the code path that spends money. It enforces the property in its own terms instead. `records` never
+come from a preview, and nothing is published on a verdict that did not see the whole page. If a
+full run cannot be obtained, the source is unconfirmed and the price does not move - that is the
+product working, not the product failing.
 
 This module is deliberately PURE. It reads attributes off the rows it is handed and returns
 dataclasses; it may import models for type annotations, but it never opens a Session and never
@@ -18,12 +42,20 @@ scraper/brightdata.py, so this file reads the same whether you are demoing or in
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Optional, Sequence, Union
 
 from app.guardian import judge
-from app.guardian.checks import FieldProfile, run_all_checks
-from app.guardian.verdict import REVIEW, Verdict, apply_judge, decide
+from app.guardian.checks import Evidence, FieldProfile, profile_run, run_all_checks
+from app.guardian.template_diff import ExtractionStatus, TemplateDiff, diff_templates
+from app.guardian.verdict import (
+    FAIL,
+    PARTIAL_EVIDENCE_CEILING,
+    REVIEW,
+    Verdict,
+    apply_judge,
+    decide,
+)
 from app.models import Baseline, Product
 from app.pricing import engine
 from app.scraper import brightdata
@@ -33,6 +65,25 @@ from app.scraper import brightdata
 # concurrency cap of 3 concurrent jobs. Enforced in the while condition, not by a break in the body.
 MAX_HEAL_ATTEMPTS = 2
 
+# WHAT THE FULL-PAGE VERIFICATION COSTS, stated where it is spent rather than in a design doc.
+#
+# Scraper Studio bills one credit per page load. Unchanged from before: one for the cycle's opening
+# run, plus the heal job itself - whose preview rows AND template diff both arrive inside what that
+# job already cost.
+#
+# ADDED: verifying one heal costs TWO more page loads, whichever way the verdict then goes.
+#   +1  the draft run, `run(..., version="dev")`: the whole page as the healed template really
+#       produces it. There is no cheaper way to get it. The gate shows two tiles of thirty, chosen
+#       for us rather than sampled, and the checks that catch a swap are structurally blind at that
+#       size - that is the measurement this whole module is built around.
+#   +1  the production probe: one ordinary run, read back to prove that the draft approve did not
+#       publish. Cheaper than being wrong about it once.
+#
+# So +2 per heal that reaches verification, and at most +4 per cycle because MAX_HEAL_ATTEMPTS is 2.
+# A heal the pre-filter rejects costs +0: both runs happen strictly AFTER the gate has declined to
+# reject, so a visibly broken heal never pays for a page it did not need.
+PAGE_LOADS_TO_VERIFY_A_HEAL = 2
+
 # Which check codes mean "this run came back broken enough to be worth healing". A degraded run is
 # about missing data, not about values we disagree with - a drifted price is a real price.
 _DEGRADATION_CODES = {"NULL_SPIKE", "FIELD_MISSING", "ROW_COUNT_SHIFT"}
@@ -40,15 +91,53 @@ _DEGRADATION_CODES = {"NULL_SPIKE", "FIELD_MISSING", "ROW_COUNT_SHIFT"}
 SimulateHint = Union[str, Sequence[str], None]
 
 
+# Where the rows a verdict was taken over actually came from. Recorded rather than inferred, because
+# "we judged the whole page" and "we judged the first two tiles" are the difference this product
+# sells, and a consumer must be able to read it off the record instead of trusting that the loop did
+# the right thing.
+ROWS_FROM_GATE = "gate_full_run"        # the gate itself handed over the whole population
+ROWS_FROM_PREVIEW = "gate_preview"      # a preview: enough to reject on, never enough to price on
+ROWS_FROM_FULL_RUN = "draft_full_run"   # run(version="dev") over the whole page - the only source
+ROWS_FROM_NOTHING = "none"              # no rows were obtained at all
+
+# What the probe after a draft approve found. See _probe_draft.
+DRAFT_HELD = "held"            # production still serves the old template. Proven, this run.
+DRAFT_PUBLISHED = "published"  # production already serves the healed one. The inference was WRONG.
+DRAFT_MOOT = "moot"            # the heal changes nothing the probe can see, so there is nothing to
+                               # prove: whether it published cannot matter.
+DRAFT_UNPROVEN = "unproven"    # the probe could not establish either. Not a licence to publish.
+
+
 @dataclass
 class HealAttempt:
     """One trip through the approval gate. A cycle records every attempt, not just the last, so the
-    event log can show the guardian's diagnosis turning into the next prompt."""
+    event log can show the guardian's diagnosis turning into the next prompt.
+
+    `verdict` is the verdict that DECIDED this attempt and `proposed_records` are the rows it was
+    taken over - on the real gate, the full-page draft run rather than the preview. The two move
+    together on purpose: every consumer (the event log, the counterfactual, the baseline ratchet)
+    wants "what did we judge, and what did it say", and letting one of them describe the other's
+    rows is how the old loop came to price off two tiles.
+    """
     attempt: int                          # 1-based
     prompt: str                           # the prompt actually sent (attempt 2 is the sharpened one)
     verdict: Verdict
     proposed_records: list[dict]
-    committed: bool                       # True iff approve_heal() was called for this attempt
+    committed: bool                       # True iff this heal was confirmed and taken as our source
+    # The cheap pre-filter's own verdict, over the gate's preview rows. None when the gate handed
+    # over a full run and there was nothing to pre-filter. Kept apart from `verdict` because "the
+    # preview objected" and "the whole page objected" are different claims, and only one of them
+    # could ever have confirmed.
+    gate_verdict: Optional[Verdict] = None
+    preview_rows: int = 0
+    rows_from: str = ROWS_FROM_GATE       # one of the ROWS_FROM_* constants above
+    in_production: bool = False           # the healed template is what the collector now serves
+    draft_probe: Optional[str] = None     # a DRAFT_* constant; None when no draft approve happened
+    # The healer's own source diff, as evidence, whatever it said. Free at the gate, independent of
+    # row count, and on a repoint it is the single most actionable sentence this product can put in
+    # front of an operator. It never decides anything - see _publishable.
+    template_diff: Optional[dict] = None
+    notes: tuple[str, ...] = ()           # things that went wrong that were not the heal's fault
 
 
 @dataclass
@@ -72,6 +161,10 @@ class CycleOutcome:
     trigger_reason: Optional[str] = None                   # None when no heal was needed
     heal_attempts: list[HealAttempt] = field(default_factory=list)
     counterfactual: Optional[dict] = None                  # populated only when a heal was rejected
+    # Set only when a SAFETY MECHANISM, rather than a heal, turned out not to work. Today there is
+    # exactly one: a draft approve that published. It is separate from `verdict` because the operator
+    # response is different in kind - a bad heal is business as usual and this is not.
+    control_alarm: Optional[str] = None
 
     @property
     def healed(self) -> bool:
@@ -117,10 +210,17 @@ def run_cycle_for_product(product: Product, baseline: Baseline, *,
     records = brightdata.run(product.collector_id, product.competitor_url, _simulate=simulate_run)
     trigger_reason = _degradation_reason(baseline, baseline_profiles, records)
 
+    # What production was serving BEFORE we touched anything. Kept because the draft probe needs a
+    # "before" reading and this is one we have already paid for. It may well be the degraded run -
+    # that is fine and in fact ideal: the question the probe asks is "did production change when we
+    # approved", not "was production any good".
+    pre_heal_records = records
+
     attempts: list[HealAttempt] = []
     source_confirmed = True
     verdict: Optional[Verdict] = None
     counterfactual: Optional[dict] = None
+    control_alarm: Optional[str] = None
 
     if simulate_heal or trigger_reason:
         if trigger_reason is None:
@@ -134,38 +234,41 @@ def run_cycle_for_product(product: Product, baseline: Baseline, *,
             attempt += 1
             proposal = brightdata.propose_heal(
                 product.collector_id, prompt, product.competitor_url,
+                capture_diff=True,
                 _simulate=_simulate_for_attempt(simulate_heal, attempt),
             )
-            verdict = _judge_if_ambiguous(
-                decide(run_all_checks(baseline_profiles, proposal.proposed_records,
-                                      baseline_count=baseline.record_count,
-                                      is_sample=proposal.is_sample)),
-                proposal.proposed_records,
-            )
-            committed = verdict.confirmed
+            record = _run_the_gate(product, baseline, baseline_profiles, proposal,
+                                   attempt=attempt, prompt=prompt,
+                                   pre_heal_records=pre_heal_records)
+            attempts.append(record)
+            verdict = record.verdict
+            source_confirmed = record.committed
 
-            if committed:
-                brightdata.approve_heal(product.collector_id)   # at most once per cycle
-                records = proposal.proposed_records
-                source_confirmed = True
-            else:
-                # Reject every failed attempt so the collector never sits at an open approval gate.
-                # Bright Data leaves the scraper unchanged on reject, which is what makes a retry
-                # with a clearer prompt safe.
-                brightdata.reject_heal(product.collector_id)
-                source_confirmed = False
+            if record.committed:
+                # The ONLY assignment of `records` from a heal, and it can only be reached from a
+                # verdict taken over a full run - see _run_the_gate. A preview never gets here.
+                records = record.proposed_records
 
-            attempts.append(HealAttempt(attempt=attempt, prompt=prompt, verdict=verdict,
-                                        proposed_records=proposal.proposed_records,
-                                        committed=committed))
+            if record.draft_probe == DRAFT_PUBLISHED:
+                # The mechanism this loop stands on is not there. Re-prompting would spend another
+                # heal against a collector we have just watched publish itself, so stop, and say
+                # which of the two problems this is.
+                control_alarm = _DRAFT_LEAK_ALARM
+                break
 
-            if committed or attempt >= max_heal_attempts:
+            if record.committed or attempt >= max_heal_attempts:
                 break
 
             # The guardian's own machine-readable diagnosis writes the next heal prompt.
             prompt = _resharpen_prompt(product, verdict)
 
     # The counterfactual describes the LAST REJECTED attempt: the number we refused to act on.
+    #
+    # Note what its rows may be. When the pre-filter rejected at the gate, they are the preview - two
+    # tiles, possibly not even containing this product, in which case _extract_competitor_price
+    # returns None and there is simply no counterfactual. That is correct and it is the one place a
+    # preview is allowed to supply a number, because this number is explicitly the one we did NOT
+    # act on. Nothing downstream may price from it.
     if not source_confirmed:
         rejected = next((a for a in reversed(attempts) if not a.committed), None)
         if rejected is not None:
@@ -205,7 +308,174 @@ def run_cycle_for_product(product: Product, baseline: Baseline, *,
         trigger_reason=trigger_reason,
         heal_attempts=attempts,
         counterfactual=counterfactual,
+        control_alarm=control_alarm,
     )
+
+
+# --------------------------------------------------------------------------------------
+# the gate, and what a heal has to prove to get past it
+# --------------------------------------------------------------------------------------
+
+def _run_the_gate(product: Product, baseline: Baseline,
+                  baseline_profiles: dict[str, FieldProfile],
+                  proposal: brightdata.HealProposal, *,
+                  attempt: int, prompt: str, pre_heal_records: list[dict]) -> HealAttempt:
+    """Take one heal proposal from the approval gate to either production or the bin.
+
+    This is the central claim of the product expressed as control flow, which is why it is one
+    function rather than four spread through the cycle: a heal reaches production only after the
+    healed template has run over the whole page and been judged on THAT run.
+
+    The two exits that are not "publish" are both safe, and deliberately so. A rejection costs
+    nothing but the heal we already paid for. A heal we could not finish verifying is HELD - the
+    price stays exactly where it was - because the absence of evidence is not evidence, and the one
+    thing this loop must never do is fill that absence with the preview.
+    """
+    diff = diff_templates(proposal.raw_diff)
+    # Recorded whatever it says, but not when it says nothing: a NO_DIFF result means the gate
+    # carried no source at all (every MOCK_MODE heal, and any caller that did not ask for it), and
+    # storing "no template diff was returned" against every heal is the kind of always-empty field
+    # operators learn to scroll past.
+    diff_evidence = diff.to_dict() if diff.status is not ExtractionStatus.NO_DIFF else None
+
+    gate = _verdict_over(baseline, baseline_profiles, proposal.proposed_records,
+                         is_sample=proposal.is_sample, population_rows=proposal.population_rows)
+    previewed = gate.evidence.is_partial
+
+    def _record(verdict: Verdict, rows: list[dict], *, committed: bool, rows_from: str,
+                in_production: bool = False, draft_probe: Optional[str] = None,
+                notes: tuple[str, ...] = ()) -> HealAttempt:
+        # Whether there was a preview at all is a property of the gate, not of the exit we took, so
+        # it is decided once here. A gate that handed over the whole page has no pre-filter verdict
+        # to report and no preview rows to count, and saying otherwise would put "2 preview rows" on
+        # a heal that was shown thirty.
+        return HealAttempt(attempt=attempt, prompt=prompt, verdict=verdict, proposed_records=rows,
+                           committed=committed, gate_verdict=(gate if previewed else None),
+                           preview_rows=(len(proposal.proposed_records) if previewed else 0),
+                           rows_from=rows_from, in_production=in_production,
+                           draft_probe=draft_probe, template_diff=diff_evidence, notes=notes)
+
+    # A gate that showed the whole page is not a preview and there is nothing further to see.
+    #
+    # The real Bright Data gate never does this - it always elides, and `is_sample` stays True on
+    # every gate payload for the reasons propose_heal argues. MOCK_MODE's fixture does, because it is
+    # a full-size stand-in rather than a sample, and so would a real gate on a page short enough to
+    # fit inside the preview. Branching on the EVIDENCE rather than on settings.mock_mode is what
+    # keeps this file reading the same in a demo and in production, and it is the honest question in
+    # both: did we see all of it?
+    if gate.evidence.is_full:
+        verdict = _with_source_note(_judge_if_ambiguous(gate, proposal.proposed_records), diff)
+        if _publishable(verdict, diff, from_full_run=False):
+            brightdata.approve_heal(product.collector_id, save_to_production=True)
+            return _record(verdict, proposal.proposed_records, committed=True,
+                           rows_from=ROWS_FROM_GATE, in_production=True)
+        if not verdict.confirmed:
+            brightdata.reject_heal(product.collector_id)
+            return _record(verdict, proposal.proposed_records, committed=False,
+                           rows_from=ROWS_FROM_GATE)
+        # Confirmed on a complete gate, and yet the healer's own source says a field now reads a
+        # different element. That buys one more page load and nothing else; fall through.
+
+    # A PREVIEW CAN REJECT, BUT IT CAN NEVER CONFIRM.
+    #
+    # The pre-filter's whole job is to spend nothing further on a heal that is already visibly
+    # wrong. The row-local checks are complete tests on a single row - a dropped field, a null
+    # spike, a crossed-out original read as the sale price - so the gate catches those for free.
+    # What it cannot do is clear anything, and this branch is the only one it has.
+    elif gate.decision == FAIL:
+        # Reject so the collector never sits at an open approval gate. Bright Data leaves the
+        # scraper unchanged on reject, which is what makes a retry with a clearer prompt safe.
+        brightdata.reject_heal(product.collector_id)
+        return _record(_with_source_note(gate, diff), proposal.proposed_records, committed=False,
+                       rows_from=ROWS_FROM_PREVIEW)
+
+    # Accept into a DRAFT. Verified from @brightdata/cli v0.3.5 source: without --auto-save the
+    # resume body is {message: true} and nothing asks for a save. INFERRED, and never confirmed
+    # against the live API: that this therefore leaves production serving the old template. The
+    # probe below is what turns that inference into a measurement, per run.
+    brightdata.approve_heal(product.collector_id, save_to_production=False)
+
+    try:
+        full_rows = brightdata.run(product.collector_id, product.competitor_url, version="dev")
+    except Exception as exc:                                    # noqa: BLE001 - argued below
+        # The full run is the only evidence that could confirm, so failing to obtain it is not an
+        # error to propagate - it is an answer. The source is unconfirmed and the price does not
+        # move. A traceback here would throw away a correct and safe outcome that is already
+        # available, and leave the caller with nothing at all to show.
+        notes = _withdraw_after_draft(product.collector_id)
+        return _record(_could_not_verify(f"the full-page run of the healed template failed ({exc})"),
+                       [], committed=False, rows_from=ROWS_FROM_NOTHING,
+                       notes=notes)
+
+    probe, probe_notes = _probe_production(product, pre_heal_records, full_rows)
+
+    verdict = _with_source_note(
+        _judge_if_ambiguous(
+            _verdict_over(baseline, baseline_profiles, full_rows,
+                          is_sample=False, population_rows=None),
+            full_rows),
+        diff)
+
+    if probe == DRAFT_PUBLISHED:
+        # Loud, and safe. Loud because a safety mechanism, not a heal, is what failed. Safe because
+        # the response is the same one the product already has for an unconfirmable source: hold,
+        # and do not move the price. Deliberately NOT a raise - see _withdraw_after_draft.
+        #
+        # And deliberately no withdrawal either, unlike every other unhappy exit below. Rejecting
+        # cannot un-publish what is already live, so the only thing it could do here is something
+        # unpredictable to a collector that is currently serving customers. Leave it, and say so.
+        return _record(_control_failed(verdict), full_rows, committed=False,
+                       rows_from=ROWS_FROM_FULL_RUN, in_production=True,
+                       draft_probe=probe, notes=probe_notes)
+
+    if probe == DRAFT_UNPROVEN:
+        # Unproven is not disproven, and it is not a licence either. Publishing here would be
+        # exactly the assumption this probe exists to stop being an assumption.
+        return _record(_could_not_prove_draft(verdict), full_rows, committed=False,
+                       rows_from=ROWS_FROM_FULL_RUN, draft_probe=probe,
+                       notes=probe_notes + _withdraw_after_draft(product.collector_id))
+
+    if not _publishable(verdict, diff, from_full_run=True):
+        return _record(verdict, full_rows, committed=False, rows_from=ROWS_FROM_FULL_RUN,
+                       draft_probe=probe,
+                       notes=probe_notes + _withdraw_after_draft(product.collector_id))
+
+    brightdata.approve_heal(product.collector_id, save_to_production=True)
+    return _record(verdict, full_rows, committed=True, rows_from=ROWS_FROM_FULL_RUN,
+                   in_production=True, draft_probe=probe, notes=probe_notes)
+
+
+def _publishable(verdict: Verdict, diff: TemplateDiff, *, from_full_run: bool) -> bool:
+    """May this heal be written to production? Three conditions, and none of them is safe to drop.
+
+    THE GUARDIAN CONFIRMED IT. Necessary, never sufficient.
+
+    THE VERDICT SAW THE WHOLE POPULATION. `decide` already caps a partial-evidence verdict below
+    PASS, so today this can never be the clause that fails - deliberately. That cap is a policy
+    constant in the guardian; this is the line of code that spends money, and it must not be one
+    edit to a threshold away from committing a delivery charge as a price. Stated here in its own
+    terms so the property survives a change of mind next door.
+
+    THE HEALER'S OWN SOURCE DOES NOT SAY A FIELD MOVED - unless we have already re-read the values
+    over the whole page. This is the template diff as an ESCALATION and never as a judgement, and
+    the study is why. The P1 heal reports has_swap=True and was CORRECT: the page genuinely swapped
+    its elements and the healer adapted with a conditional on the label text, right on all 30 rows.
+    That is structurally indistinguishable from being talked into a swap, which was wrong. So a
+    repoint can buy exactly one more page load. It can never reject, and after the full run it has
+    no vote at all - by then the values have answered the question the source could only raise.
+    """
+    if not verdict.confirmed or not verdict.evidence.is_full:
+        return False
+    return from_full_run or not diff.is_semantic
+
+
+def _verdict_over(baseline: Baseline, baseline_profiles: dict[str, FieldProfile],
+                  records: list[dict], *, is_sample: bool,
+                  population_rows: Optional[int]) -> Verdict:
+    """The battery and the roll-up in one call, so both halves of the evidence travel together."""
+    return decide(run_all_checks(baseline_profiles, records,
+                                 baseline_count=baseline.record_count,
+                                 is_sample=is_sample, population_rows=population_rows))
 
 
 def _judge_if_ambiguous(verdict: Verdict, records: list[dict]) -> Verdict:
@@ -214,10 +484,215 @@ def _judge_if_ambiguous(verdict: Verdict, records: list[dict]) -> Verdict:
     A clean PASS needs no second opinion and a CRITICAL FAIL has already been decided, so REVIEW is
     the only verdict worth spending an API call on. Outside MOCK_MODE with a key configured this is at
     most one call per held cycle; mocked, it is a no-op.
+
+    Called on the DECIDING verdict only, never on a preview. Two reasons, and the second is the
+    stronger. Every preview verdict is now a REVIEW by construction, so consulting here would mean
+    an LLM call on every single heal, to produce an opinion that cannot change the outcome. And the
+    judge reads the same two biased rows the checks read: a model reporting "these look like prices"
+    about two delivery charges is precisely what the measured failure looks like from the inside.
     """
     if verdict.decision != REVIEW:
         return verdict
     return apply_judge(verdict, judge.judge_fields(records))
+
+
+# --------------------------------------------------------------------------------------
+# proving the draft assumption, once per approve
+# --------------------------------------------------------------------------------------
+
+# How far two runs' numbers may differ and still look like the output of the same template. Live
+# pages move: a price drifts overnight, a card sells out, the catalogue reorders. A REPOINTED field
+# does not drift, it jumps - the study's shipping-in-price heal moved the median by a factor of ~87.
+# 2x sits far above the first and far below the second, which is the entire requirement.
+_SAME_TEMPLATE_RATIO = 2.0
+
+# Likewise for emptiness. A field going from always-present to mostly-empty is a selector that
+# stopped matching, not a page having a quiet day.
+_SAME_TEMPLATE_NULL_DELTA = 0.4
+
+_DRAFT_LEAK_ALARM = (
+    "Accepting a heal PUBLISHED it. `approve` without --auto-save was expected to leave production "
+    "serving the previous template; production changed anyway. Until that is settled with Bright "
+    "Data, treat every approve as a publish: Vouch cannot gate what it cannot hold back, so it will "
+    "not move a price off this collector."
+)
+
+
+def _probe_production(product: Product, pre_heal_records: list[dict],
+                      full_rows: list[dict]) -> tuple[str, tuple[str, ...]]:
+    """Did accepting the heal leave production alone? Measured for THIS approve, not assumed.
+
+    One ordinary run of the collector, read back and compared against two references we already
+    hold: what production returned at the top of this cycle, and what the healed template returns.
+    Production looking like the first and not the second is the inference holding. Production
+    looking like the second is the inference being wrong, which is the case worth paying a page load
+    to find out about, because the silent version of it publishes bad prices.
+    """
+    try:
+        production_rows = brightdata.run(product.collector_id, product.competitor_url)
+    except Exception as exc:                                    # noqa: BLE001
+        return DRAFT_UNPROVEN, (f"could not read production back after approving: {exc}",)
+    return _probe_draft(pre_heal_records, full_rows, production_rows), ()
+
+
+def _probe_draft(pre_heal: list[dict], healed: list[dict], production: list[dict]) -> str:
+    """Three-way comparison, in the order that keeps each answer honest.
+
+    MOOT comes first. If the healed template extracts the same shape production already did, the two
+    hypotheses are indistinguishable - and harmlessly so, because a template that changes nothing
+    this comparison can see cannot move a price by publishing early. Reporting that as "held" would
+    be claiming a measurement we did not make.
+    """
+    if _same_extraction(pre_heal, healed):
+        return DRAFT_MOOT
+    if _same_extraction(production, healed):
+        return DRAFT_PUBLISHED
+    if _same_extraction(production, pre_heal):
+        return DRAFT_HELD
+    # Production matches neither, so something moved that was not us - the page changed again
+    # mid-cycle, most likely. Nothing here licenses a publish.
+    return DRAFT_UNPROVEN
+
+
+def _same_extraction(left: list[dict], right: list[dict]) -> bool:
+    """Do these two runs look like the output of the SAME template?
+
+    Deliberately not row equality. Two runs of one template minutes apart are never equal, so
+    equality would report a template change on every comparison and the probe above would cry wolf
+    until someone deleted it - and a safety check that always fires is a safety check that gets
+    removed.
+
+    What a repoint moves instead is the SHAPE of the extraction: which fields exist, what kind of
+    value each holds, how often it is empty, and roughly how big it is. Those are stable under a
+    page's own churn and violent under a selector change. Built on profile_run so it measures the
+    same things the guardian measures rather than inventing a second vocabulary for them.
+
+    KNOWN BLIND SPOT, and it is fine: two fields of the same type and similar magnitude trading
+    places is invisible here, because `price` and `original_price` are 14% apart. This function is
+    not a check. It answers one question - is production serving the healed template - and the
+    guardian answers the other one, on the rows themselves, with the whole battery.
+    """
+    left_profiles, right_profiles = profile_run(left), profile_run(right)
+    if set(left_profiles) != set(right_profiles):
+        return False
+    for name, a in left_profiles.items():
+        b = right_profiles[name]
+        if a.dtype != b.dtype:
+            return False
+        if abs(a.null_rate - b.null_rate) > _SAME_TEMPLATE_NULL_DELTA:
+            return False
+        if not _same_magnitude(a, b):
+            return False
+    return True
+
+
+def _same_magnitude(a: FieldProfile, b: FieldProfile) -> bool:
+    """Are two profiles' central values the same size, allowing for a page's own drift?
+
+    Compared as a RATIO rather than bucketed. Buckets look tidy and are wrong at their edges: 999
+    and 1001 land either side of an order-of-magnitude boundary, and reporting that as a changed
+    template would hold a good heal for no reason.
+    """
+    if a.dtype == "numeric":
+        x, y = a.median, b.median
+    elif a.dtype == "string":
+        x, y = a.mean_len, b.mean_len
+    else:
+        return True                     # a bool's true-rate is too volatile to carry this weight
+    if x is None or y is None:
+        # One side measurable and the other not is itself a difference: the field stopped parsing.
+        return x is None and y is None
+    x, y = abs(x), abs(y)
+    if x == 0 or y == 0:
+        return x == y
+    return max(x, y) / min(x, y) <= _SAME_TEMPLATE_RATIO
+
+
+def _withdraw_after_draft(collector_id: str) -> tuple[str, ...]:
+    """Put the collector back to "no heal pending" after we have already answered its gate.
+
+    Rejecting an OPEN gate is a known-good operation and the pre-filter above does exactly that.
+    This is not that. The automation job has already been resumed with {message: true}, and what
+    `scraper approve --reject` does to a job in that state is not something the CLI source settles.
+    Attempted anyway, because the request it sends is {message: false}, and there is no reading of
+    that which publishes anything: the worst case is a no-op.
+
+    Contained, because by the time we are here production is untouched and the price is already
+    held, so the only thing an exception could add is the loss of a correct answer. The currency
+    guard in scraper/brightdata.py argues the opposite case at length and earns it by sitting
+    upstream of every verdict; this sits after one, which is what makes the trade different.
+    """
+    try:
+        brightdata.reject_heal(collector_id)
+        return ()
+    except Exception as exc:                                    # noqa: BLE001 - argued above
+        return (f"could not withdraw the accepted heal; it remains in draft: {exc}",)
+
+
+# --------------------------------------------------------------------------------------
+# verdicts about the verification itself, rather than about the heal
+# --------------------------------------------------------------------------------------
+
+def _with_source_note(verdict: Verdict, diff: TemplateDiff) -> Verdict:
+    """Put the healer's own account of what it changed in front of the operator.
+
+    Only on a repoint, because that is the only case worth a human's attention: the study's
+    healthy-page probe changed comments and a defensive numeric guard, and surfacing that as a
+    change is how a warning channel teaches people to ignore it.
+
+    Appended, never substituted. The guardian's finding is the decision; this is the explanation,
+    and a brief that led with the explanation would read as if the source had decided.
+    """
+    if not diff.is_semantic or not diff.summary:
+        return verdict
+    return replace(verdict, brief=f"{verdict.brief} What the healer changed in the collector's own "
+                                  f"source: {diff.summary}")
+
+
+def _could_not_verify(reason: str) -> Verdict:
+    """The verdict for a heal we never managed to run over the full page.
+
+    Not a finding against the heal - an absence of evidence, which this product answers with a hold.
+    Zero rows judged, stated as such, so nothing downstream can read the empty failure list as a
+    clean bill of health.
+    """
+    return Verdict(
+        decision=REVIEW, confidence=0,
+        brief=(f"Couldn't confirm this heal: {reason}. The competitor price is left where it was, "
+               f"because the only rows that could have settled it were never obtained."),
+        failures=[], evidence=Evidence(rows_judged=0),
+    )
+
+
+def _could_not_prove_draft(verdict: Verdict) -> Verdict:
+    """A full run we DID judge, held anyway because the publish could not be shown to be ours."""
+    return replace(
+        verdict,
+        decision=(FAIL if verdict.decision == FAIL else REVIEW),
+        # The ceiling the guardian uses for "an open question". Borrowed rather than re-invented:
+        # what is missing here is not evidence about the rows, but it is the same kind of gap, and a
+        # second number meaning the same thing is a number that drifts.
+        confidence=min(verdict.confidence, PARTIAL_EVIDENCE_CEILING),
+        brief=("Couldn't prove that accepting this heal left production untouched, so it was not "
+               f"published and the price has not moved. {verdict.brief}"),
+    )
+
+
+def _control_failed(verdict: Verdict) -> Verdict:
+    """The heal is live in production and nothing of ours gated it there.
+
+    Held whatever the rows said. The values may well be fine - they are judged and reported either
+    way, and the brief carries that judgement - but what failed is the mechanism that is supposed to
+    make "verified before it ships" true, and continuing to move money through a control we have
+    just measured as absent is the thing this product exists not to do. Holding costs one cycle. The
+    alternative costs the claim.
+    """
+    return replace(
+        verdict,
+        decision=(FAIL if verdict.decision == FAIL else REVIEW),
+        confidence=min(verdict.confidence, PARTIAL_EVIDENCE_CEILING),
+        brief=f"{_DRAFT_LEAK_ALARM} The full-page verdict on the healed rows: {verdict.brief}",
+    )
 
 
 # --------------------------------------------------------------------------------------

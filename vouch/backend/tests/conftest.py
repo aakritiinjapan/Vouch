@@ -26,6 +26,9 @@ TEST_DATASET = "sample_runs"
 
 @pytest.fixture(autouse=True, scope="session")
 def _pin_fixture_dataset():
+    # Session-scoped mutation is safe for sequential runs (the default). If pytest-xdist is
+    # introduced, replace this with a monkeypatch or env-var override so each worker gets its own
+    # settings instance rather than sharing the module-level singleton.
     previous = settings.demo_dataset
     settings.demo_dataset = TEST_DATASET
     yield

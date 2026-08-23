@@ -11,8 +11,16 @@ from app.config import settings
 
 log = logging.getLogger(__name__)
 
-engine = create_engine(settings.database_url, echo=False,
-                       connect_args={"check_same_thread": False})
+engine = create_engine(
+    settings.database_url,
+    echo=False,
+    connect_args={"check_same_thread": False},
+    # SQLite serialises writes at the database level, so a small pool is fine. pool_pre_ping
+    # drops stale connections before use rather than surfacing them as OperationalErrors.
+    pool_size=5,
+    max_overflow=10,
+    pool_pre_ping=True,
+)
 
 
 def init_db() -> None:

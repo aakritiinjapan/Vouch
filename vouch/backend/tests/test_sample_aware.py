@@ -19,7 +19,7 @@ from __future__ import annotations
 import pytest
 
 from app.guardian.checks import MIN_ROWS_FOR_DISTRIBUTION, profile_run, run_all_checks
-from app.guardian.verdict import FAIL, PASS, REVIEW, decide
+from app.guardian.verdict import FAIL, PARTIAL_EVIDENCE_CEILING, PASS, REVIEW, decide
 
 # Shaped like the real collector's output: 96 cards, wide price spread, shipping almost always free.
 BASELINE = [
@@ -44,13 +44,29 @@ def _verdict(rows: list[dict], *, is_sample: bool):
 # 1. no false findings from the sample size
 # --------------------------------------------------------------------------------------
 
-def test_a_one_row_preview_of_a_good_heal_passes_cleanly():
-    """The real case. This heal extracted a valid price; the guardian must say so."""
+def test_a_one_row_preview_of_a_good_heal_is_held_not_confirmed():
+    """The real case, and the one this file originally got wrong.
+
+    This test used to assert PASS 100/100, on the reasoning that the heal extracted a valid price and
+    the guardian should say so. The first half is right and is still asserted below: the sample size
+    must not manufacture findings, so `failures` stays empty.
+
+    The second half was wrong, and docs/research/FINDINGS.md is the measurement that proves it. A
+    heal that put the delivery charge in `price` produced an equally empty failure list on the gate's
+    preview and scored the same 100/100 - because the checks that catch a swap are distributional and
+    a preview switches them off. If a good heal and a broken one are indistinguishable at the gate,
+    then a clean preview is not evidence of a good heal, and confirming on it is not a judgement.
+
+    So the correct answer is REVIEW: nothing objected, but nothing was in a position to. Confirming
+    requires a full run, which costs one more page load.
+    """
     verdict = _verdict(GOOD_PREVIEW, is_sample=True)
 
-    assert verdict.decision == PASS
-    assert verdict.confidence == 100
-    assert verdict.failures == []
+    assert verdict.failures == [], "sample size must not invent findings"
+    assert verdict.decision == REVIEW
+    assert verdict.confirmed is False
+    assert verdict.confidence <= PARTIAL_EVIDENCE_CEILING
+    assert verdict.full_battery is False
 
 
 def test_without_the_sample_flag_the_same_preview_is_misdiagnosed():

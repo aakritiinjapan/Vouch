@@ -1,11 +1,18 @@
-# Static single-file site: no build step, index.html is served as-is.
+# Static site: no build step, the HTML files are served as-is. index.html is the data testbed;
+# p1/p2/p3.html are the adversarial page-structure probes, deployed side by side.
 [build]
   publish = "."
   command = ""
 
 # A test fixture should never be indexed as if it were a real shop. The page also carries
 # <meta name="robots" content="noindex, nofollow">; this covers crawlers that read headers only.
+#
+# Cache-Control is the load-bearing one for the adversarial probes. The whole protocol is "redeploy
+# a different page to the SAME url and ask the healer to look again", and a cached response makes a
+# stale answer indistinguishable from a healer working off a stale DOM - which is exactly the P3
+# hypothesis. A page nobody caches cannot supply that alibi. Cheap here: the site is ~19 KB.
 [[headers]]
   for = "/*"
   [headers.values]
     X-Robots-Tag = "noindex, nofollow"
+    Cache-Control = "no-store, max-age=0, must-revalidate"

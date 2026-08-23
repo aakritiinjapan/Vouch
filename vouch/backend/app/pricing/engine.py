@@ -1,12 +1,11 @@
 """
-Repricing rules. Deliberately simple for the hackathon — the intelligence is in the guardian,
-not here. The one rule that matters: never propose a price that breaks the floor margin.
-
-Claude Code: extend with strategy (undercut by X, match, hold) as time allows, but keep the floor.
+Repricing rules. The intelligence is in the guardian, not here.
+The one rule that matters: never propose a price that breaks the floor margin.
 """
 
 from __future__ import annotations
 
+import math
 from typing import Optional
 
 
@@ -20,6 +19,19 @@ def propose_price(product, competitor_price: Optional[float]) -> tuple[float, st
 
     if competitor_price is None:
         return product.my_price, "No confirmed competitor price this cycle — leaving price unchanged."
+
+    # NaN and infinity are not high or low prices, they are a failed parse wearing a float's clothes,
+    # and they defeat the floor in the one way that matters: every comparison against NaN is False, so
+    # `target < floor` below quietly answers "no" and the clamp never runs. The engine would hand back
+    # NaN as a price — or infinity, which SQLite stores happily, reaches the product row, and
+    # serialises as the literal `Infinity`, which is not valid JSON for whoever reads it back.
+    # _coerce_number() turns "NaN", "inf" and "1e400" into exactly these, so one garbage cell on the
+    # competitor's page is enough to produce one. Treat them as no price at all — the only branch in
+    # this function that never moves money.
+    if not math.isfinite(competitor_price):
+        return product.my_price, (
+            f"Competitor price came back as '{competitor_price}', which is not a number we can price "
+            f"against — leaving price unchanged.")
 
     target = round(competitor_price - 0.01, 2)     # undercut by a cent
     if target < floor:

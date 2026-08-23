@@ -35,6 +35,7 @@ so Scraper Studio needs no browser mode and a run is one page load.
 ```bash
 cd vouch/testbed
 python generate.py                       # writes index.html (clean baseline)
+python generate.py --adversarial         # ...and p1/p2/p3.html, the page-structure probes
 ```
 
 Then either:
@@ -115,11 +116,79 @@ MOCK_MODE=false python -m scripts.live_heal --collector c_YOUR_ID --prompt-style
 
 ---
 
+## The adversarial pages — probing the healer, not the guardian
+
+Everything above corrupts the **data** and leaves the markup alone. That tests the guardian: we
+already know what went wrong and we are asking whether the checks say so. It tests the **healer**
+not at all, because the healer was never given a structural decision to make.
+
+These three vary the DOM instead. Each is a hypothesis about how Bright Data's AI picks a selector,
+arranged so a wrong pick shows up in the extracted **values** — we cannot read the selector it
+emits, so the page has to make the difference measurable.
+
+```bash
+python generate.py --adversarial          # writes p1.html, p2.html, p3.html
+npx netlify-cli deploy --dir . --prod     # all three live at once
+```
+
+Give each page **its own collector**. A heal is a 5–10 minute AI job and AI-Flow caps concurrency at
+3, so three collectors probed in parallel is an hour and one URL probed serially is a day.
+
+| | Page | The DOM edit | Hypothesis | Severity |
+|---|---|---|---|---|
+| **P1** | `p1.html` | tile 1 has no crossed-out price and no delivery line; on tiles 2–30 the price and the delivery charge have traded places in the markup | the approval gate previews **one row**, so a selector fitted to tile 1 previews clean and is wrong on 29 of 30 | high |
+| **P2** | `p2.html` | `price` and `shipping` in byte-identical markup — same class, same `$NN.NN`, adjacent siblings, no label — with shipping first | the healer anchors on **position**, not meaning | medium |
+| **P3** | `p3.html` | visually and semantically identical, every class renamed, values untouched | the healer works from a DOM **cached at collector-creation time**, so it proposes selectors for classes that no longer exist | **highest** |
+
+### P1 is the load-bearing one
+
+The break is that the price and the delivery charge swapped places in the markup. The word
+"Shipping" travelled with the delivery amount; the CSS classes did not. So `.price-current` reads
+`$19.99 Shipping` in 21px bold and the small green `.price-ship` line holds the real price — a
+textbook `COLUMN_SWAP`, and a heal is plainly warranted.
+
+Tile 1 has no delivery line at all, so it had nothing to trade places *with*, and its
+`.price-current` still holds the real price. That one difference splits the two anchors a healer can
+reach for — both of which fit tile 1 perfectly:
+
+| Anchor | Tile 1 | Tiles 2–30 |
+|---|---|---|
+| positional — first money node under `.item-price` | $1,999.99 ✅ | $19.99 — the delivery charge ❌ |
+| semantic — the money *not* labelled "Shipping" | $1,999.99 ✅ | $1,149.99 ✅ |
+
+The sharpest form of it: the positional reading reproduces the **incumbent** selector's output
+exactly. The "repair" would change nothing at all and still look like a fix, because the only row
+anyone is shown is the one row the incumbent already gets right.
+
+### P3 is a two-step, and the order matters
+
+```bash
+python generate.py --adversarial                              # p3.html = the ORIGINAL layout
+# ...create the collector against p3.html, confirm 30 good rows...
+python generate.py --variant renamed_dom_after --out p3.html  # same page, every class renamed
+npx netlify-cli deploy --dir . --prod                         # SAME url
+```
+
+The rename has to land on a URL the collector already knows, or there is no cached snapshot to be
+stale. `netlify.toml` sends `Cache-Control: no-store` for exactly this reason — a cached response
+would make a stale CDN indistinguishable from a stale DOM, which is the hypothesis under test.
+Before healing, `curl` the URL and confirm you get `prod-card` and not `item`.
+
+### Every one of them is winnable
+
+For all three, a selector that is correct on **all thirty tiles** exists, and it is the one the
+collector description already asks for. `verify.py` proves that offline: it reads each page twice,
+once the lazy way and once the way the description asks, and asserts the second reading recovers the
+clean page's values exactly. If the healer gets it wrong, the page answered the question and the
+healer did not.
+
+---
+
 ## Verify before you deploy
 
 ```bash
-python verify.py            # runs the REAL guardian over all 8 variants, offline, free
-python verify.py --verbose  # also prints each brief
+python verify.py            # the REAL guardian over all 9 variants + the 3 adversarial pages, free
+python verify.py --verbose  # also prints each brief and each claim's evidence
 ```
 
 `verify.py` renders each variant, **parses the HTML back out the way a collector would**, and runs
@@ -130,6 +199,13 @@ rather than as a surprise on live infrastructure. It caught three real design bu
 It asserts only that each variant trips its intended **check** — not the decision. Whether a fired
 check crosses the hold threshold is `verdict.decide`'s scoring policy, and a testbed that encoded
 policy would break every time a threshold was tuned, for a reason having nothing to do with the page.
+
+The adversarial section asserts something different, because those pages make claims about Bright
+Data rather than about the guardian. All it can settle offline is whether the **page** is shaped the
+way the claim needs — that a right answer was reachable and a specific wrong answer was reachable
+too. That matters more than it sounds: a malformed or unwinnable fixture is a far cheaper
+explanation for a failed heal than a bug in the healer, and it is the explanation a sceptical reader
+reaches for first.
 
 ### ⚠️ The two marked PASS above are worth knowing about
 
@@ -147,6 +223,6 @@ deliberate policy choice, not an accident, and it is better stated than discover
 
 ## Honesty
 
-Every product, price, rating and stock state on this page is **invented**. It is a test fixture, not
-a storefront, and it says so in the footer, in an HTML comment, and via `robots: noindex, nofollow`.
-Nothing here is for sale and no real retailer's data is reproduced.
+Every product, price, rating and stock state on every page here is **invented**. They are test
+fixtures, not a storefront, and each one says so in the footer, in an HTML comment, and via
+`robots: noindex, nofollow`. Nothing here is for sale and no real retailer's data is reproduced.

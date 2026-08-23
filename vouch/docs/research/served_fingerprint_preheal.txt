@@ -1,0 +1,3 @@
+p1.html  item=30  prod-card=0  price-current=31  cost-now=0  Shipping=29  sha=fe74a213937a
+p2.html  item=30  prod-card=0  price-current=1  cost-now=0  Shipping=0  sha=b21099ebbfe0
+p3.html  item=0  prod-card=156  price-current=0  cost-now=31  Shipping=30  sha=ebb30e75a09b

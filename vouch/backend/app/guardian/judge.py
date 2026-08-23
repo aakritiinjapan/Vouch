@@ -120,7 +120,12 @@ def judge_fields(records: list[dict],
                            notes="judge not consulted (mock mode, no API key, or nothing to judge)",
                            consulted=False)
 
-    sample = random.sample(records, min(sample_size, len(records)))
+    # Seed from a deterministic hash of the candidate records so the same proposal always
+    # draws the same sample and produces a reproducible verdict, even when the judge is consulted
+    # on multiple retries of the same heal attempt.
+    seed = hash(tuple(sorted(str(r) for r in records)))
+    rng = random.Random(seed)
+    sample = rng.sample(records, min(sample_size, len(records)))
     rows = "\n".join(f"  {i + 1}. {json.dumps(row, default=str)}" for i, row in enumerate(sample))
     fields = "\n".join(f'  - "{name}": {desc}' for name, desc in descriptions.items())
 

@@ -12,7 +12,7 @@ import json
 from pathlib import Path
 from typing import Optional
 
-from fastapi import APIRouter, Body, Depends, HTTPException, Query
+from fastapi import APIRouter, Body, Depends, Header, HTTPException, Query
 from sqlmodel import Session, select
 
 from app import service
@@ -34,6 +34,17 @@ from app.scraper import baseline as baseline_capture
 from app.scraper.brightdata import fixture_path
 
 router = APIRouter()
+
+
+def _require_api_key(x_api_key: str = Header(default="")) -> None:
+    """Dependency that enforces the API key when one is configured.
+
+    When `settings.api_key` is empty (the default demo mode), every request passes through.
+    Set API_KEY in .env to gate all mutating endpoints in a deployed environment.
+    """
+    if settings.api_key and x_api_key != settings.api_key:
+        raise HTTPException(status_code=401, detail={"detail": "invalid or missing X-API-Key"})
+
 
 # Profiling is O(rows x fields); /verify is a public, unauthenticated surface, so both caller-supplied
 # lists are capped rather than left to consume unbounded CPU. Well above any real preview or baseline.
@@ -131,7 +142,9 @@ def verify(body: schemas.VerifyRequest = Body(...)):
     if has_records:
         serialized, inferred_count = baseline_capture.capture(body.baseline_records)
     else:
-        serialized = body.baseline_profiles
+        # BaselineProfileIn is a validated model now, not a bare dict, so unwrap it before
+        # FieldProfile.from_dict - which does cls(**d) and would otherwise be handed a model.
+        serialized = {name: prof.model_dump() for name, prof in body.baseline_profiles.items()}
 
     # from_dict does cls(**d), so a caller-supplied profile with wrong/missing keys would raise a
     # TypeError and escape as a 500. This endpoint ingests arbitrary caller data, so a malformed
@@ -140,6 +153,19 @@ def verify(body: schemas.VerifyRequest = Body(...)):
         baseline_profiles = {name: FieldProfile.from_dict(prof) for name, prof in serialized.items()}
     except (TypeError, ValueError) as exc:
         raise HTTPException(422, detail={"detail": f"malformed baseline_profiles: {exc}"})
+
+    # An empty baseline is NO baseline, and it must never be scored. Every check compares the
+    # candidate against a NAMED baseline field, so with no fields the entire battery stands down:
+    # zero checks fire, zero failures come back, and decide() reads that silence as a clean run. The
+    # caller would be told `confirmed: true, confidence: 100` about rows that nothing ever looked at
+    # - the single worst answer a trust endpoint can give, and worse than an error, because it is
+    # actionable. Refuse the request instead.
+    #
+    # Tested on the PROFILES, not on the input list's length: `baseline_records=[{}, {}]` is a
+    # non-empty list that profiles to no fields at all, and a length check would wave it through.
+    if not baseline_profiles:
+        raise HTTPException(422, detail={
+            "detail": "baseline is empty - no fields to compare against, so no verdict is possible"})
 
     # Infer the baseline row count when the caller omits it, from EITHER shape: len(records) on the
     # raw path, the profiles' own count on the precomputed path. Defaulting to 0 would silently
@@ -153,6 +179,7 @@ def verify(body: schemas.VerifyRequest = Body(...)):
 
     results = run_all_checks(baseline_profiles, body.candidate_records, baseline_count,
                              is_sample=body.is_sample,
+                             population_rows=body.population_rows,
                              reference_prices=body.reference_prices)
     verdict = decide(results)
 
@@ -180,6 +207,11 @@ def verify(body: schemas.VerifyRequest = Body(...)):
             for f in verdict.failures
         ],
         judge_consulted=judge_consulted,
+        # Provenance travels with the verdict, always. A consumer gating on `confirmed` alone
+        # inherits exactly the blindness this product exists to remove - see VerifyResponse.
+        rows_judged=len(body.candidate_records),
+        full_battery=verdict.full_battery,
+        checks_stood_down=list(verdict.checks_stood_down),
     )
 
 
@@ -263,7 +295,8 @@ def list_proposals(
 
 @router.post("/proposals/approve-safe", response_model=schemas.BulkApproveResponse)
 def approve_safe(body: schemas.BulkApproveRequest = Body(default=schemas.BulkApproveRequest()),
-                 session: Session = Depends(session_dep)):
+                 session: Session = Depends(session_dep),
+                 _auth: None = Depends(_require_api_key)):
     """The "Approve all safe changes" button.
 
     Held proposals are structurally out of scope - is_safe() requires PENDING - and every skip comes
@@ -286,7 +319,8 @@ def approve_safe(body: schemas.BulkApproveRequest = Body(default=schemas.BulkApp
 
 @router.post("/proposals/{proposal_id}/approve", response_model=schemas.ApproveResponse)
 def approve(proposal_id: int, force: bool = Query(default=False),
-            session: Session = Depends(session_dep)):
+            session: Session = Depends(session_dep),
+            _auth: None = Depends(_require_api_key)):
     """Approving a HELD proposal requires force=true and returns 409 without it.
 
     That refusal is the product, not a safety rail bolted on afterwards: the whole promise is that you
@@ -307,7 +341,8 @@ def approve(proposal_id: int, force: bool = Query(default=False),
 
 @router.post("/proposals/{proposal_id}/reject", response_model=schemas.ProposalOut)
 def reject(proposal_id: int, note: Optional[str] = Query(default=None),
-           session: Session = Depends(session_dep)):
+           session: Session = Depends(session_dep),
+           _auth: None = Depends(_require_api_key)):
     """Also backs the held card's [Skip this cycle] - pass note=skipped."""
     try:
         proposal = service.reject_proposal(session, proposal_id, note=note)
@@ -339,7 +374,8 @@ def list_heal_events(limit: int = Query(default=50, le=200),
 
 @router.post("/cycles/run", response_model=schemas.CycleRunResponse)
 def run_cycles(body: schemas.CycleRunRequest = Body(default=schemas.CycleRunRequest()),
-               session: Session = Depends(session_dep)):
+               session: Session = Depends(session_dep),
+               _auth: None = Depends(_require_api_key)):
     """Run every product's cycle (serially - Bright Data caps concurrent AI-Flow jobs at 3).
 
     The simulate hints are MOCK-ONLY and the refusal is visible: outside MOCK_MODE they are dropped,
@@ -406,7 +442,8 @@ def demo_hints():
 
 
 @router.post("/demo/reset")
-def demo_reset(session: Session = Depends(session_dep)):
+def demo_reset(session: Session = Depends(session_dep),
+               _auth: None = Depends(_require_api_key)):
     """Restore the demo's opening state.
 
     Not a convenience. No-op suppression means a queue that has run one cycle too many is an EMPTY
@@ -444,9 +481,9 @@ def demo_reset(session: Session = Depends(session_dep)):
     session.commit()
 
     # rebuild the confirmed price history the chart needs
-    from scripts.seed import _seed_history
+    from scripts.seed import seed_history
     products = session.exec(select(Product).order_by(Product.sku)).all()
-    history = _seed_history(session, list(products), rows)
+    history = seed_history(session, list(products), rows)
 
     return {"reset": True, "deleted": deleted, "history_observations": history,
             "products": len(products), "prices_restored": restored}
