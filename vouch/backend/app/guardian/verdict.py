@@ -60,6 +60,11 @@ FAIL = "fail"
 # displayed as one. A clean preview is an open question, and 65 is what an open question looks like.
 PARTIAL_EVIDENCE_CEILING = 65
 
+# Decision thresholds. Both are referenced by service.py (CONFIDENCE_SAFE_FLOOR mirrors
+# PASS_THRESHOLD by design — one number, one meaning, defined once).
+FAIL_THRESHOLD = 60
+PASS_THRESHOLD = 85
+
 # Evidence assumed when a caller hands `decide` a bare list instead of a CheckBattery. See the
 # CheckBattery docstring: this is the legacy contract - hand-built result lists in tests and in
 # callers that judged a complete run - and defaulting it to partial would hold every such verdict
@@ -201,9 +206,9 @@ def decide(results: list[CheckResult], *, evidence: Optional[Evidence] = None) -
     has_critical = any(r.severity == Severity.CRITICAL for r in failures)
     has_high = any(r.severity == Severity.HIGH for r in failures)
 
-    if has_critical or confidence < 60:
+    if has_critical or confidence < FAIL_THRESHOLD:
         decision = FAIL
-    elif has_high or confidence < 85 or evidence.is_partial:
+    elif has_high or confidence < PASS_THRESHOLD or evidence.is_partial:
         decision = REVIEW
     else:
         decision = PASS

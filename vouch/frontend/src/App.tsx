@@ -24,7 +24,6 @@ function scenarioForProposal(proposal: Proposal): ScenarioKey {
     case "VALUE_ORDER_INVERTED":
       return "crossed-out";
     case "COLUMN_SWAP":
-      return "column-swap";
     default:
       return "column-swap";
   }

@@ -108,7 +108,7 @@ def _upsert_products(session, specs: list[dict], collector_id: str) -> list[Prod
     return products
 
 
-def _seed_history(session, products: list[Product], rows: list[dict]) -> int:
+def seed_history(session, products: list[Product], rows: list[dict]) -> int:
     """Give each product a confirmed price history, unless it already has one."""
     by_name = {str(r.get("name", "")).strip().lower(): r for r in rows}
     written = 0
@@ -152,7 +152,7 @@ def main(argv: list[str] | None = None) -> None:
     with get_session() as session:
         products = _upsert_products(session, specs, COLLECTOR_ID)
         product_count = len(products)
-        history = _seed_history(session, products, rows)
+        history = seed_history(session, products, rows)
 
         # Persist the baseline the guardian validates every heal against. Imported lazily so this
         # script does not depend on the service layer's error types just to bootstrap.

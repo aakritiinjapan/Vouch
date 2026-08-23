@@ -29,7 +29,7 @@ from typing import Iterable, Optional
 
 from sqlmodel import Session, select
 
-from app.guardian.verdict import Verdict
+from app.guardian.verdict import PASS_THRESHOLD, Verdict
 from app.models import (
     Baseline,
     CompetitorObservation,
@@ -45,9 +45,9 @@ from app.orchestrator import CycleOutcome, SimulateHint, run_cycle_for_product
 from app.scraper import baseline as baseline_capture
 from app.scraper import brightdata
 
-# A proposal is "safe" to bulk-approve when the guardian was confident AND the move is small. 85
-# mirrors verdict.py's PASS threshold deliberately: one number, one meaning, defined once.
-CONFIDENCE_SAFE_FLOOR = 85
+# A proposal is "safe" to bulk-approve when the guardian was confident AND the move is small.
+# Mirrors verdict.py's PASS_THRESHOLD: one number, one meaning, defined once.
+CONFIDENCE_SAFE_FLOOR = PASS_THRESHOLD
 SAFE_DELTA_PCT = 0.15
 
 # below this, a price change is not worth a human's attention
@@ -410,7 +410,8 @@ def _price_to_apply(proposal: RepriceProposal) -> float:
     return float(applied)
 
 
-def approve_proposal(session: Session, proposal_id: int, *, force: bool = False) -> RepriceProposal:
+def approve_proposal(session: Session, proposal_id: int, *, force: bool = False,
+                     _commit: bool = True) -> RepriceProposal:
     proposal = _load_proposal(session, proposal_id)
 
     if proposal.decided_at is not None:
@@ -448,8 +449,9 @@ def approve_proposal(session: Session, proposal_id: int, *, force: bool = False)
     product.updated_at = _now()
     session.add(proposal)
     session.add(product)
-    session.commit()
-    session.refresh(proposal)
+    if _commit:
+        session.commit()
+        session.refresh(proposal)
     return proposal
 
 
@@ -513,8 +515,12 @@ def approve_all_safe(session: Session, *, min_confidence: int = CONFIDENCE_SAFE_
             result.skipped.append({"id": proposal.id, "why": why})
             continue
         # Same code path as a single approval, so the floor guard cannot be bypassed in bulk.
-        approve_proposal(session, proposal.id)
+        # _commit=False defers the write; a single commit below makes the whole batch atomic.
+        approve_proposal(session, proposal.id, _commit=False)
         result.approved.append(proposal.id)
+
+    if result.approved:
+        session.commit()
 
     return result
 

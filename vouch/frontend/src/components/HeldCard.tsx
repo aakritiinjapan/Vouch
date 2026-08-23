@@ -271,7 +271,7 @@ export function HeldCard({
               {proposal.product.name}
             </p>
             <p className="mt-0.5 truncate text-xs text-ink-muted">
-              {proposal.guardian?.check_code ?? "held"} · couldn&rsquo;t verify · vs Newegg
+              {proposal.guardian?.check_code ?? "held"} · couldn&rsquo;t verify · vs {new URL(proposal.source.url).hostname}
             </p>
           </div>
           {cf && (
@@ -305,7 +305,7 @@ export function HeldCard({
           {proposal.guardian?.check_code && <CheckBadge code={proposal.guardian.check_code} />}
         </div>
           <p className="mt-2 truncate text-sm font-medium text-ink" title={proposal.product.name}>
-            {proposal.product.name} <span className="text-ink-muted">· vs Newegg</span>
+            {proposal.product.name} <span className="text-ink-muted">· vs {new URL(proposal.source.url).hostname}</span>
           </p>
         </div>
         <button

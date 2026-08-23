@@ -30,6 +30,15 @@ class Settings(BaseSettings):
     mock_mode: bool = True                       # run without Bright Data / Anthropic
     database_url: str = f"sqlite:///{DB_PATH.as_posix()}"
 
+    # When set, every mutating endpoint requires an `X-API-Key: <value>` header.
+    # Leave empty (the default) for the open demo mode.
+    api_key: str = ""
+
+    # Origins allowed by CORS. Separate multiple values with commas in the env var.
+    # Defaults to localhost dev servers; set to your deployed frontend origin in production.
+    allowed_origins: list[str] = ["http://localhost:5173", "http://localhost:4173",
+                                   "http://localhost:3000"]
+
     # Which fixture MOCK_MODE replays, by basename under backend/tests/fixtures/.
     #
     # 'newegg_live' is derived from the real collector's 96-row run (see
