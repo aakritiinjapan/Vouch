@@ -96,8 +96,13 @@ def test_a_correct_scrape_of_a_dubious_page_still_passes():
         _sale_row("Voltmart RTX 5080 Stormbringer 16GB GDDR7", 899.99, 1599.99),
         _sale_row("Voltmart RTX 5070 Pulse 12GB GDDR7", 499.99, 1099.99),
     ]
-    results = run_all_checks(baseline, sale_rows, len(baseline_rows),
-                             is_sample=True, reference_prices=BEFORE_SALE)
+    # A FULL run, deliberately. What this test is about is the SEVERITY of the reference-price
+    # finding - that a LOW finding about the retailer's own claim cannot sink an extraction that is
+    # itself correct. It used to pass is_sample=True incidentally, which now caps the verdict at
+    # REVIEW on evidence grounds and would mask the very thing being asserted. Sampling behaviour is
+    # tested on its own in test_sample_aware.py; keep the two concerns apart.
+    results = run_all_checks(baseline, sale_rows, len(sale_rows),
+                             reference_prices=BEFORE_SALE)
     verdict = decide(results)
 
     codes = {r.code for r in verdict.failures}
@@ -167,6 +172,8 @@ def test_reference_prices_omitted_leaves_every_other_check_untouched():
     baseline = profile_run(baseline_rows)
     clean = [_sale_row(n, p, p * 1.1) for n, p in BEFORE_SALE.items()]
 
-    verdict = decide(run_all_checks(baseline, clean, len(baseline_rows), is_sample=True))
+    # Full run for the same reason as above: this asserts that omitting reference_prices leaves every
+    # OTHER verdict untouched, which is only observable when evidence is not the limiting factor.
+    verdict = decide(run_all_checks(baseline, clean, len(baseline_rows)))
     assert verdict.decision == "pass"
     assert verdict.confidence == 100
