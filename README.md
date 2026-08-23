@@ -496,6 +496,65 @@ Vouch/
 
 ---
 
+## Demo data — what is real, what is synthetic, and why
+
+The demo uses two data sources. Everything in the repricer is derived from a real live scrape. Everything in the sale checker is synthetic. The distinction is stated precisely here so judges can verify every claim.
+
+### Newegg — real collector output
+
+The repricer runs against real data from Bright Data Scraper Studio collector **`c_mszq0z1x27brru3wab`**, built against [Newegg's GPU category page](https://www.newegg.com/GPUs-Video-Graphics-Cards/SubCategory/ID-48?PageSize=96). The full raw output is committed at [`vouch/docs/sample_output.json`](vouch/docs/sample_output.json).
+
+- **96 rows**, one per GPU listing — ASRock, ASUS, Gigabyte, MSI, ZOTAC, XFX, Sapphire, PowerColor, PNY, ONIX
+- **Fields collected:** `name`, `price`, `shipping`, `in_stock`, `rating`
+- **Price range:** $139.99 – $6,900.00
+- **Shipping:** zero on 94 of 96 rows; two rows carry a non-zero fee — ZOTAC ARCTICSTORM RTX 5090 ($6,900.00 + $19.99) and MSI Gaming RTX 5090 ($4,699.99 + $19.99). These two rows are what make the COLUMN\_SWAP demo concrete: a heal that swaps `price` and `shipping` replaces a $6,900 price with $19.99 — a 345× error.
+
+From that real baseline, three variants are constructed for offline replay:
+
+| Variant | What it represents | How it's constructed |
+|---|---|---|
+| `baseline` | The clean, confirmed run | 100% real collector output, verbatim |
+| `run_degraded` | Layout break — selectors stopped matching | Real rows with `price` nulled on 75% of rows |
+| `healed_good` | A correct heal after a price movement | Real rows with prices scaled by 0.992 |
+| `healed_swapped` | **The dangerous heal Vouch catches** | Real rows with `price` and `shipping` exchanged |
+
+The construction is documented inside [`vouch/backend/scripts/build_demo_fixture.py`](vouch/backend/scripts/build_demo_fixture.py). The values on both sides of the swap are the collector's own numbers — nothing is invented.
+
+**The three products tracked in the repricer demo** are chosen from the 96 because they are the rows where the swap is most dramatic:
+
+| SKU | Product | Our price | Unit cost | Exposure if swapped |
+|---|---|---|---|---|
+| `GPU-5090-ZOTAC` | ZOTAC ARCTICSTORM AIO GeForce RTX 5090 | $6,999 | $5,600 | −$951/unit |
+| `GPU-5090-MSI` | MSI Gaming GeForce RTX 5090 32G GAMING TRIO OC | $4,779 | $3,820 | −$653/unit |
+| `GPU-5090-ASUS` | ASUS ROG Astral GeForce RTX 5090 OC Edition | $4,899 | $3,900 | −$609/unit |
+
+---
+
+### Voltmart — a purpose-built synthetic storefront
+
+**Voltmart does not exist.** It is a fake retailer invented specifically as a test fixture for Vouch. Every product name, price, rating, and stock state is fabricated. The pages carry a footer notice, an HTML comment, and `<meta name="robots" content="noindex, nofollow">` confirming they are test data.
+
+**Why Voltmart exists:** the real Newegg data cannot exercise two of the guardian's most important checks:
+
+1. **COLUMN\_SWAP between `price` and `shipping`** requires non-trivially varying shipping costs. Newegg returns "Free Shipping" on 94 of 96 rows — a field that looks like a constant, not a distribution, so the swap detector has nothing to distinguish it from.
+2. **VALUE\_ORDER\_INVERTED** (sale price > original price) requires `original_price` to be present and reliable. Newegg returns it on only ~33% of tiles, and never consistently, so it cannot anchor an invariant check.
+
+Voltmart is designed to fill both gaps: every product has a non-zero, varying shipping fee ($4.99–$24.99), and 22 of 30 products carry an `original_price` set 5–30% above the current price.
+
+**What the storefront contains:**
+
+- **30 synthetic GPU products** — fictitious "Voltix RTX", "Voltix RX", and "Voltix Arc" SKUs
+- **Price range:** $89.99 – $2,449.99
+- **Fields:** `name`, `price`, `shipping`, `rating`, `in_stock`, `original_price`
+- **9 data variants** available for scraping: `clean`, `swap`, `inverted`, `nulls`, `missing`, `collapse`, `instock`, `drift`, `fake_sale`
+- **3 adversarial DOM-structure pages** (P1, P2, P3) — layouts designed to break a selector that relies on a specific class or nesting, so the heal loop can be exercised end-to-end against a page the team controls
+
+The sale checker demo uses the **`fake_sale` variant** of Voltmart, in which 3 of 8 products advertise a "was-price" inflated to 1.6× the clean-page price. The `clean` page is the pre-sale baseline. A judge can verify the claim by comparing [`vouch/testbed/index.html`](vouch/testbed/index.html) (clean) against the `fake_sale` dataset in [`vouch/backend/tests/fixtures/sample_runs.json`](vouch/backend/tests/fixtures/sample_runs.json).
+
+The Voltmart pages are hosted on Netlify and three live Bright Data collectors (`c_mt5gwa3w1eknnqzr2`, `c_mt5gye8j2jjqinpxz9`, `c_mt5gyg1d1web67uas2`) are built against the adversarial variants. The generator script is at [`vouch/testbed/generate.py`](vouch/testbed/generate.py).
+
+---
+
 ## Data sources and compliance
 
 The collector reads a **public** Newegg category page. No authentication, no paywalled or
